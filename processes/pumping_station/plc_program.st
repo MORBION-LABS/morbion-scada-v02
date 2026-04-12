@@ -5,15 +5,20 @@
 
    Control Strategy:
      - Level-based pump start/stop
-     - Dry run protection with TON timer
+     - Dry run protection with TON timer (accumulates correctly)
      - Outlet valve modulation on alarms
      - Conservation law monitoring
-     - All safety interlocks checked first
+     - Safety interlocks checked first every scan
    ================================================================ *)
+
+VAR
+    dry_run_timer    : TON;
+    conservation_tmr : TON;
+END_VAR
 
 (* ── SAFETY INTERLOCKS — checked every scan before anything else ── *)
 
-(* Critical low level — dry run imminent *)
+(* Critical low level — dry run imminent, hard stop *)
 IF level_sensor_pct < 5.0 THEN
     pump_run_cmd    := FALSE;
     inlet_valve_cmd := FALSE;
@@ -66,14 +71,12 @@ ELSE
 END_IF;
 
 (* ── DRY RUN PROTECTION ───────────────────────────────────────── *)
-(* TON timer: pump running with no flow for 10s trips the pump    *)
+(* TON instance accumulates elapsed time across scans correctly.   *)
+(* If pump running with no flow for 10 continuous seconds → trip.  *)
 
-dry_run_active := TON(
-    pump_running AND flow_m3hr < 5.0,
-    10.0
-);
+dry_run_timer(IN := pump_running AND flow_m3hr < 5.0, PT := 10.0);
 
-IF dry_run_active THEN
+IF dry_run_timer.Q THEN
     pump_run_cmd    := FALSE;
     inlet_valve_cmd := FALSE;
     fault_code      := 4;
@@ -81,11 +84,13 @@ END_IF;
 
 (* ── CONSERVATION LAW CHECK ───────────────────────────────────── *)
 (* Q_pump * dt = delta_V + Q_demand * dt                          *)
-(* Violation flags sensor manipulation or real leak               *)
+(* Sustained violation flags sensor manipulation or real leak.    *)
 
 conservation_error := ABS(flow_m3hr - demand_flow_m3hr - net_flow_m3hr);
 
-IF conservation_error > 15.0 AND pump_running THEN
+conservation_tmr(IN := conservation_error > 15.0 AND pump_running, PT := 5.0);
+
+IF conservation_tmr.Q THEN
     conservation_alarm := TRUE;
 ELSE
     conservation_alarm := FALSE;
