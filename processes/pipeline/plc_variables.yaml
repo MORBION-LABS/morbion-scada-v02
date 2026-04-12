@@ -1,0 +1,37 @@
+# Pipeline PLC Variable Map
+# MORBION SCADA v02
+#
+# Input/Output image separation:
+# Inputs READ from ProcessState at scan start.
+# Outputs WRITTEN to ProcessState at scan end.
+# main.py applies pump commands to equipment objects.
+# operator_reset maps to fault_code — operator writes 0 to clear.
+
+inputs:
+  outlet_pressure_bar:   outlet_pressure_bar
+  inlet_pressure_bar:    inlet_pressure_bar
+  flow_rate_m3hr:        flow_rate_m3hr
+  duty_pump_running:     duty_pump_running
+  duty_pump_fault:       duty_pump_fault
+  standby_pump_running:  standby_pump_running
+  standby_pump_fault:    standby_pump_fault
+  process_running:       process_running
+  fault_code:            fault_code
+  operator_reset:        fault_code
+
+outputs:
+  duty_pump_cmd:     duty_pump_running
+  standby_pump_cmd:  standby_pump_running
+  inlet_valve_cmd:   inlet_valve_open
+  outlet_valve_sp:   outlet_valve_position_pct
+  fault_code:        fault_code
+  leak_flag_cmd:     leak_flag
+  leak_alarm:        alarm_leak
+  inlet_low_alarm:   alarm_inlet_low
+  outlet_low_alarm:  alarm_outlet_low
+
+parameters:
+  outlet_pressure_nominal: 40.0
+  outlet_valve_setpoint:   85.0
+  leak_threshold:          15.0
+  expected_flow:           450.0
