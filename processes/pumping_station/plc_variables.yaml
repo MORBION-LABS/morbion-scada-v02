@@ -1,0 +1,30 @@
+# Pumping Station PLC Variable Map
+# MORBION SCADA v02
+#
+# inputs:     read from ProcessState at start of each scan
+# outputs:    written back to ProcessState at end of each scan
+# parameters: constants injected into the ST environment
+#
+# ST variable names are case-insensitive — stored uppercase internally.
+# state_field names must exactly match ProcessState dataclass fields.
+
+inputs:
+  level_sensor_pct:       level_sensor_pct
+  discharge_pressure_bar: discharge_pressure_bar
+  flow_m3hr:              flow_m3hr
+  pump_running:           pump_running
+  demand_flow_m3hr:       demand_flow_m3hr
+  net_flow_m3hr:          net_flow_m3hr
+  fault_code:             fault_code
+  tank_level_pct:         tank_level_pct
+
+outputs:
+  pump_run_cmd:          pump_running
+  inlet_valve_cmd:       inlet_valve_open
+  outlet_valve_sp:       outlet_valve_pos_pct
+  fault_code:            fault_code
+  conservation_alarm:    alarm_no_flow
+
+parameters:
+  level_start: 20.0
+  level_stop:  80.0

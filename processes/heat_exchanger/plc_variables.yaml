@@ -1,0 +1,29 @@
+# Heat Exchanger PLC Variable Map
+# MORBION SCADA v02
+
+inputs:
+  T_hot_in:         T_hot_in
+  T_hot_out:        T_hot_out
+  T_cold_in:        T_cold_in
+  T_cold_out:       T_cold_out
+  efficiency:       efficiency
+  hot_pump_fault:   hot_pump_fault
+  cold_pump_fault:  cold_pump_fault
+  hot_pump_running: hot_pump_running
+  cold_pump_running: cold_pump_running
+  process_running:  process_running
+  fault_code:       fault_code
+  flow_hot:         flow_hot
+  flow_cold:        flow_cold
+
+outputs:
+  hot_pump_cmd:      hot_pump_running
+  cold_pump_cmd:     cold_pump_running
+  hot_valve_cmd:     hot_valve_position_pct
+  cold_valve_cmd:    cold_valve_position_pct
+  fault_code:        fault_code
+  efficiency_alarm:  alarm_efficiency_low
+
+parameters:
+  hot_valve_sp:  80.0
+  cold_valve_sp: 75.0
