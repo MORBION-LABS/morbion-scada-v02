@@ -6,34 +6,40 @@
    Control Strategy:
      - Start/stop both pumps based on process_running flag
      - Maintain valves at configured setpoints
-     - Overtemp protection — close hot valve on high T_cold_out
-     - Efficiency monitoring — alarm on low efficiency
+     - Overtemp protection — modulate hot valve on high T_cold_out
+     - Efficiency monitoring — alarm on sustained low efficiency
      - Pump fault handling — trip on dual fault
    ================================================================ *)
+
+VAR
+    overtemp_timer   : TON;
+    eff_alarm_timer  : TON;
+    startup_delay    : TON;
+END_VAR
 
 (* ── SAFETY INTERLOCKS ────────────────────────────────────────── *)
 
 (* Cold outlet overtemp — immediate hot valve closure *)
 IF T_cold_out > 95.0 THEN
-    hot_valve_cmd   := 0.0;
-    fault_code      := 3;
+    hot_valve_cmd := 0.0;
+    fault_code    := 3;
     RETURN;
 END_IF;
 
 (* Hot outlet overtemp *)
 IF T_hot_out > 165.0 THEN
-    hot_valve_cmd   := 20.0;
-    fault_code      := 3;
+    hot_valve_cmd := 20.0;
+    fault_code    := 3;
     RETURN;
 END_IF;
 
 (* Both pumps faulted — full shutdown *)
 IF hot_pump_fault AND cold_pump_fault THEN
-    hot_pump_cmd    := FALSE;
-    cold_pump_cmd   := FALSE;
-    hot_valve_cmd   := 0.0;
-    cold_valve_cmd  := 0.0;
-    fault_code      := 1;
+    hot_pump_cmd   := FALSE;
+    cold_pump_cmd  := FALSE;
+    hot_valve_cmd  := 0.0;
+    cold_valve_cmd := 0.0;
+    fault_code     := 1;
     RETURN;
 END_IF;
 
@@ -58,31 +64,46 @@ IF NOT cold_pump_fault THEN
     cold_pump_cmd := TRUE;
 END_IF;
 
-(* Valve control — maintain configured setpoints *)
-(* Modulate hot valve down if cold outlet approaching limit *)
-IF T_cold_out > 85.0 THEN
-    hot_valve_cmd := LIMIT(30.0, hot_valve_sp - ((T_cold_out - 85.0) * 5.0), hot_valve_sp);
-ELSE
-    hot_valve_cmd := hot_valve_sp;
-END_IF;
+(* Startup delay — give pumps 15 seconds to reach speed            *)
+(* before applying valve setpoints to avoid water hammer           *)
+startup_delay(IN := process_running, PT := 15.0);
 
-cold_valve_cmd := cold_valve_sp;
+IF startup_delay.Q THEN
+    (* Modulate hot valve down if cold outlet approaching limit *)
+    IF T_cold_out > 85.0 THEN
+        hot_valve_cmd := LIMIT(30.0,
+                               hot_valve_sp - ((T_cold_out - 85.0) * 5.0),
+                               hot_valve_sp);
+    ELSE
+        hot_valve_cmd := hot_valve_sp;
+    END_IF;
+
+    cold_valve_cmd := cold_valve_sp;
+ELSE
+    (* During startup hold valves at minimum *)
+    hot_valve_cmd  := 20.0;
+    cold_valve_cmd := 20.0;
+END_IF;
 
 (* ── FAULT RECOVERY ───────────────────────────────────────────── *)
 
-(* Clear overtemp fault when temperatures recover *)
-IF fault_code = 3 AND T_cold_out < 88.0 AND T_hot_out < 158.0 THEN
+(* Overtemp timer — must be below limit for 10s before clearing   *)
+overtemp_timer(IN := T_cold_out < 88.0 AND T_hot_out < 158.0, PT := 10.0);
+
+IF fault_code = 3 AND overtemp_timer.Q THEN
     fault_code := 0;
 END_IF;
 
-(* Clear pump fault when individual pump recovers *)
 IF fault_code = 1 AND NOT hot_pump_fault AND NOT cold_pump_fault THEN
     fault_code := 0;
 END_IF;
 
 (* ── EFFICIENCY ALARM ─────────────────────────────────────────── *)
+(* Sustained low efficiency — not a momentary dip                 *)
 
-IF efficiency < 60.0 AND process_running THEN
+eff_alarm_timer(IN := efficiency < 60.0 AND process_running, PT := 30.0);
+
+IF eff_alarm_timer.Q THEN
     efficiency_alarm := TRUE;
 ELSE
     efficiency_alarm := FALSE;
