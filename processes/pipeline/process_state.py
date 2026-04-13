@@ -1,8 +1,13 @@
 """
 process_state.py — Pipeline Pump Station
-Central shared state. All equipment reads from and writes to this.
-Live in-memory communication. Persistence handled separately.
-Thread-safe via context manager.
+MORBION SCADA v02
+
+KEY FIX FROM v01:
+  leak_flag was typed as int (0/1) in v01.
+  v02 types it as bool throughout for consistency.
+  The Modbus server scales bool → int for the register bank.
+  The SCADA reader scales int → bool back.
+  This prevents type confusion in alarm evaluators and ST programs.
 """
 
 import threading
@@ -47,7 +52,8 @@ class ProcessState:
     pump_differential_bar:   float = 0.0
 
     # ── Leak Detection ────────────────────────────────────────────
-    leak_flag:               int   = 0
+    # FIX: leak_flag is bool not int
+    leak_flag:               bool  = False
     flow_balance_error:      float = 0.0
 
     # ── Alarms ────────────────────────────────────────────────────
@@ -79,7 +85,8 @@ class ProcessState:
             "outlet_valve_position":  self.outlet_valve_position_pct,
             "inlet_pressure_bar":     self.inlet_pressure_bar,
             "outlet_pressure_bar":    self.outlet_pressure_bar,
-            "fault_code":             self.fault_code
+            "fault_code":             self.fault_code,
+            "leak_flag":              self.leak_flag,
         }
         with open(path, 'w') as f:
             json.dump(data, f, indent=2)
@@ -100,3 +107,4 @@ class ProcessState:
         self.inlet_pressure_bar        = data.get("inlet_pressure_bar",    2.0)
         self.outlet_pressure_bar       = data.get("outlet_pressure_bar",   0.0)
         self.fault_code                = data.get("fault_code",            0)
+        self.leak_flag                 = bool(data.get("leak_flag",        False))
