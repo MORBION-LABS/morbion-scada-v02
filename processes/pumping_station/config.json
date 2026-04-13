@@ -1,0 +1,69 @@
+{
+    "process": {
+        "name": "Pumping Station",
+        "description": "Nairobi Water Municipal Pumping Station",
+        "port": 502,
+        "unit_id": 1,
+        "scan_interval_ms": 100
+    },
+    "pump": {
+        "rated_speed_rpm": 1450,
+        "rated_flow_m3hr": 120.0,
+        "rated_head_m": 60.0,
+        "rated_efficiency": 0.72,
+        "setpoint_rpm": 1450,
+        "tau": 10.0,
+        "pipe_diameter_m": 0.1,
+        "pipe_length_m": 200.0,
+        "friction_factor": 0.018,
+        "static_head_m": 25.0
+    },
+    "tank": {
+        "diameter_m": 4.0,
+        "height_m": 4.0,
+        "initial_level_pct": 50.0,
+        "demand_flow_m3hr": 60.0
+    },
+    "inlet_valve": {
+        "tau": 8.0,
+        "fail_position": "closed"
+    },
+    "outlet_valve": {
+        "tau": 6.0,
+        "setpoint_pct": 85.0,
+        "fail_position": "closed"
+    },
+    "level_sensor": {
+        "noise_std": 0.15,
+        "scale_lo": 0.0,
+        "scale_hi": 100.0
+    },
+    "flow_meter": {
+        "noise_std": 1.2,
+        "scale_lo": 0.0,
+        "scale_hi": 200.0
+    },
+    "pressure_sensor": {
+        "noise_std": 0.02,
+        "scale_lo": 0.0,
+        "scale_hi": 20.0
+    },
+    "alarms": {
+        "level_high":         {"limit": 90.0, "deadband": 2.0, "priority": "HIGH"},
+        "level_low":          {"limit": 10.0, "deadband": 2.0, "priority": "CRITICAL"},
+        "level_low_low":      {"limit": 5.0,  "deadband": 1.0, "priority": "CRITICAL"},
+        "no_flow_on_run":     {"limit": 5.0,  "deadband": 2.0, "priority": "CRITICAL"},
+        "pressure_high":      {"limit": 8.0,  "deadband": 0.2, "priority": "HIGH"}
+    },
+    "control": {
+        "level_start_pct": 20.0,
+        "level_stop_pct":  80.0,
+        "dry_run_delay_s": 10.0
+    },
+    "operating_conditions": {
+        "tank_volume_m3":        50.3,
+        "pump_flow_nominal_m3hr": 120.0,
+        "demand_flow_m3hr":       60.0,
+        "net_fill_rate_m3hr":     60.0
+    }
+}

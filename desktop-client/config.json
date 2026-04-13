@@ -1,0 +1,17 @@
+{
+  "server": {
+    "host": "",
+    "port": 5000
+  },
+  "ui": {
+    "poll_display_ms": 500,
+    "sparkline_points": 120,
+    "theme": "dark_cyan",
+    "logo_path": "",
+    "background_image_path": "",
+    "background_opacity": 0.08,
+    "window_title": "MORBION SCADA v3.0",
+    "window_width": 1600,
+    "window_height": 950
+  }
+}

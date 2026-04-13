@@ -1,0 +1,66 @@
+{
+    "process": {
+        "name": "Pipeline Pump Station",
+        "description": "Kenya Pipeline Company — Mombasa to Nairobi",
+        "port": 508,
+        "unit_id": 1,
+        "scan_interval_ms": 100
+    },
+    "duty_pump": {
+        "rated_speed_rpm": 1480,
+        "rated_flow_m3hr": 450,
+        "rated_head_bar": 46,
+        "rated_efficiency": 0.78,
+        "setpoint_rpm": 1480,
+        "tau": 10.0,
+        "specific_gravity": 0.85
+    },
+    "standby_pump": {
+        "rated_speed_rpm": 1480,
+        "rated_flow_m3hr": 450,
+        "rated_head_bar": 46,
+        "rated_efficiency": 0.78,
+        "setpoint_rpm": 1480,
+        "tau": 10.0,
+        "specific_gravity": 0.85
+    },
+    "inlet_valve": {
+        "tau": 8.0,
+        "fail_position": "closed"
+    },
+    "outlet_valve": {
+        "Cv_max": 120.0,
+        "tau": 10.0,
+        "setpoint_pct": 85.0,
+        "fail_position": "closed"
+    },
+    "pipeline": {
+        "diameter_m": 0.356,
+        "length_m": 15000,
+        "elevation_m": 50,
+        "friction_factor": 0.018,
+        "specific_gravity": 0.85
+    },
+    "flow_meter": {
+        "noise_std": 1.5,
+        "scale_lo": 0.0,
+        "scale_hi": 600.0
+    },
+    "pressure_sensors": {
+        "inlet":  {"noise_std": 0.02, "scale_lo": 0.0, "scale_hi": 10.0},
+        "outlet": {"noise_std": 0.05, "scale_lo": 0.0, "scale_hi": 80.0}
+    },
+    "alarms": {
+        "outlet_pressure_high": {"limit": 55.0,  "deadband": 1.0, "priority": "CRITICAL"},
+        "outlet_pressure_low":  {"limit": 38.0,  "deadband": 1.0, "priority": "HIGH"},
+        "inlet_pressure_low":   {"limit": 1.0,   "deadband": 0.2, "priority": "HIGH"},
+        "flow_low":             {"limit": 200.0,  "deadband": 20.0,"priority": "MEDIUM"},
+        "leak_suspected":       {"threshold": 15.0, "priority": "CRITICAL"}
+    },
+    "operating_conditions": {
+        "inlet_pressure_nominal":  2.0,
+        "outlet_pressure_nominal": 40.0,
+        "flow_nominal_m3hr":       450.0,
+        "pump_speed_nominal":      1480
+    }
+}

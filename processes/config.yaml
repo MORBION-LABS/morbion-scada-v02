@@ -1,0 +1,32 @@
+processes:
+  boiler:
+    description: EABL/Bidco Industrial Steam Generation
+    enabled: true
+    folder: boiler
+    name: Boiler
+    port: 507
+  heat_exchanger:
+    description: KenGen Olkaria Geothermal Heat Recovery
+    enabled: true
+    folder: heat_exchanger
+    name: Heat Exchanger
+    port: 506
+  pipeline:
+    description: Kenya Pipeline Co. Petroleum Transfer
+    enabled: true
+    folder: pipeline
+    name: Pipeline
+    port: 508
+  pumping_station:
+    description: Nairobi Water Municipal Pumping Station
+    enabled: true
+    folder: pumping_station
+    name: Pumping Station
+    port: 502
+settings:
+  auto_restart_on_failure: false
+  log_dir: logs
+  log_lines: 50
+  plc_host: 192.168.100.10
+  scan_interval_ms: 100
+  server_host: 192.168.100.30

@@ -1,0 +1,81 @@
+{
+    "process": {
+        "name": "Boiler Steam Generation",
+        "description": "EABL/Bidco Industrial Steam Plant",
+        "port": 507,
+        "unit_id": 1,
+        "scan_interval_ms": 100
+    },
+    "burner": {
+        "fuel_flow_rated_kghr": 180.0,
+        "LHV_kJkg": 50000.0,
+        "eta_combustion": 0.85,
+        "tau_ignition": 15.0,
+        "tau_modulation": 8.0,
+        "flue_gas_temp_high": 220.0,
+        "flue_gas_temp_low": 160.0,
+        "excess_air_pct": 15.0
+    },
+    "drum": {
+        "volume_m3": 4.5,
+        "water_mass_kg": 2800.0,
+        "pressure_nominal_bar": 8.0,
+        "pressure_high_bar": 10.0,
+        "pressure_low_bar": 6.0,
+        "level_nominal_pct": 50.0,
+        "h_fg_kJkg": 2048.0,
+        "h_f_kJkg": 721.0,
+        "Cp_water_kJkgK": 4.186,
+        "tau_thermal": 120.0
+    },
+    "feedwater_pump": {
+        "rated_speed_rpm": 1450,
+        "rated_flow_kghr": 4500.0,
+        "rated_head_bar": 12.0,
+        "rated_efficiency": 0.72,
+        "setpoint_rpm": 1200,
+        "tau": 8.0
+    },
+    "steam_valve": {
+        "Cv_max": 35.0,
+        "tau": 10.0,
+        "setpoint_pct": 70.0,
+        "fail_position": "closed"
+    },
+    "feedwater_valve": {
+        "Cv_max": 40.0,
+        "tau": 8.0,
+        "setpoint_pct": 60.0,
+        "fail_position": "closed"
+    },
+    "blowdown_valve": {
+        "Cv_max": 8.0,
+        "tau": 5.0,
+        "setpoint_pct": 0.0,
+        "fail_position": "closed"
+    },
+    "sensors": {
+        "drum_pressure": {"noise_std": 0.02, "scale_lo": 0.0, "scale_hi": 20.0},
+        "drum_temp":     {"noise_std": 0.3,  "scale_lo": 0.0, "scale_hi": 250.0},
+        "drum_level":    {"noise_std": 0.2,  "scale_lo": 0.0, "scale_hi": 100.0},
+        "steam_flow":    {"noise_std": 5.0,  "scale_lo": 0.0, "scale_hi": 6000.0},
+        "feedwater_flow":{"noise_std": 5.0,  "scale_lo": 0.0, "scale_hi": 6000.0},
+        "fuel_flow":     {"noise_std": 0.5,  "scale_lo": 0.0, "scale_hi": 300.0},
+        "flue_gas_temp": {"noise_std": 1.0,  "scale_lo": 0.0, "scale_hi": 400.0}
+    },
+    "alarms": {
+        "drum_pressure_high": {"limit": 10.0,  "deadband": 0.2, "priority": "CRITICAL"},
+        "drum_pressure_low":  {"limit": 6.0,   "deadband": 0.2, "priority": "HIGH"},
+        "drum_level_low":     {"limit": 20.0,  "deadband": 2.0, "priority": "CRITICAL"},
+        "drum_level_high":    {"limit": 80.0,  "deadband": 2.0, "priority": "HIGH"},
+        "flame_failure":      {"priority": "CRITICAL"},
+        "pump_fault":         {"priority": "CRITICAL"}
+    },
+    "operating_conditions": {
+        "drum_pressure_nominal":  8.0,
+        "drum_level_nominal":     50.0,
+        "steam_flow_nominal_kghr": 3733.0,
+        "feedwater_temp_C":       80.0,
+        "blowdown_rate_pct":      2.0
+    }
+}

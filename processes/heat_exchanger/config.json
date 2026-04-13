@@ -1,0 +1,69 @@
+{
+    "process": {
+        "name": "Heat Exchanger Station",
+        "description": "KenGen Olkaria Geothermal Heat Recovery",
+        "port": 506,
+        "unit_id": 1,
+        "scan_interval_ms": 100
+    },
+   
+    "heat_exchanger": {
+        "U": 850.0,
+        "A": 36.3,
+        "Cp_hot": 3800.0,
+        "Cp_cold": 4186.0,
+        "tau": 45.0,
+        "fouling_factor": 0.0
+    },
+    "hot_pump": {
+        "rated_speed_rpm": 1450,
+        "rated_flow_lpm": 750,
+        "rated_head_bar": 4.5,
+        "setpoint_rpm": 1200,
+        "tau": 8.0
+    },
+    "cold_pump": {
+        "rated_speed_rpm": 1450,
+        "rated_flow_lpm": 1080,
+        "rated_head_bar": 3.8,
+        "setpoint_rpm": 1100,
+        "tau": 8.0
+    },
+    "hot_valve": {
+        "Cv_max": 45.0,
+        "setpoint_pct": 80.0,
+        "tau": 12.0,
+        "fail_position": "closed"
+    },
+    "cold_valve": {
+        "Cv_max": 55.0,
+        "setpoint_pct": 75.0,
+        "tau": 12.0,
+        "fail_position": "closed"
+    },
+    "sensors": {
+        "T_hot_in":        {"noise_std": 0.3, "drift_rate": 0.002, "scale_lo": 0.0,  "scale_hi": 300.0},
+        "T_hot_out":       {"noise_std": 0.3, "drift_rate": 0.002, "scale_lo": 0.0,  "scale_hi": 300.0},
+        "T_cold_in":       {"noise_std": 0.2, "drift_rate": 0.001, "scale_lo": 0.0,  "scale_hi": 150.0},
+        "T_cold_out":      {"noise_std": 0.2, "drift_rate": 0.001, "scale_lo": 0.0,  "scale_hi": 150.0},
+        "flow_hot":        {"noise_std": 2.0, "drift_rate": 0.005, "scale_lo": 0.0,  "scale_hi": 1500.0},
+        "flow_cold":       {"noise_std": 2.0, "drift_rate": 0.005, "scale_lo": 0.0,  "scale_hi": 2000.0},
+        "pressure_hot_in": {"noise_std": 0.02,"drift_rate": 0.001, "scale_lo": 0.0,  "scale_hi": 10.0},
+        "pressure_hot_out":{"noise_std": 0.02,"drift_rate": 0.001, "scale_lo": 0.0,  "scale_hi": 10.0},
+        "pressure_cold_in":{"noise_std": 0.02,"drift_rate": 0.001, "scale_lo": 0.0,  "scale_hi": 10.0},
+        "pressure_cold_out":{"noise_std":0.02,"drift_rate": 0.001, "scale_lo": 0.0,  "scale_hi": 10.0}
+    },
+    "alarms": {
+        "T_hot_out_high":     {"limit": 160.0, "deadband": 2.0, "priority": "HIGH"},
+        "T_cold_out_high":    {"limit": 95.0,  "deadband": 1.0, "priority": "HIGH"},
+        "efficiency_low":     {"limit": 60.0,  "deadband": 2.0, "priority": "MEDIUM"},
+        "hot_pump_fault":     {"priority": "CRITICAL"},
+        "cold_pump_fault":    {"priority": "CRITICAL"}
+    },
+    "operating_conditions": {
+        "T_hot_in_nominal":   180.0,
+        "T_cold_in_nominal":  25.0,
+        "m_hot_nominal":      12.5,
+        "m_cold_nominal":     18.0
+    }
+}

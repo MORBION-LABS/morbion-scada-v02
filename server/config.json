@@ -1,0 +1,22 @@
+{
+  "plc_host": "",
+  "poll_rate_s": 1.0,
+  "server_host": "",
+  "server_port": 5000,
+  "modbus_timeout_s": 3.0,
+
+  "processes": {
+    "pumping_station": { "enabled": true, "port": 502, "register_count": 15 },
+    "heat_exchanger":  { "enabled": true, "port": 506, "register_count": 17 },
+    "boiler":          { "enabled": true, "port": 507, "register_count": 15 },
+    "pipeline":        { "enabled": true, "port": 508, "register_count": 15 }
+  },
+
+  "influxdb": {
+    "enabled": false,
+    "url":    "http://localhost:8086",
+    "token":  "your-token-here",
+    "org":    "morbion",
+    "bucket": "plant_data"
+  }
+}
