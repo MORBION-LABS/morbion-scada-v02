@@ -1,0 +1,35 @@
+# Boiler PLC Variable Map
+# MORBION SCADA v02
+#
+# IMPORTANT — Input/Output image separation:
+# Inputs are READ from ProcessState at scan start.
+# Outputs are WRITTEN to ProcessState at scan end.
+# main.py applies output commands to equipment objects.
+# The PLC never directly starts/stops equipment — it sets command fields.
+
+inputs:
+  drum_pressure_bar:    drum_pressure_bar
+  drum_level_pct:       drum_level_pct
+  steam_flow_kghr:      steam_flow_kghr
+  feedwater_flow_kghr:  feedwater_flow_kghr
+  fw_pump_fault:        fw_pump_fault
+  fw_pump_running:      fw_pump_running
+  process_running:      process_running
+  fault_code:           fault_code
+  operator_reset:       fault_code    # operator writes 0 to fault_code register
+
+outputs:
+  burner_cmd:          burner_state
+  fw_pump_cmd:         fw_pump_running
+  steam_valve_cmd:     steam_valve_pos_pct
+  fw_valve_cmd:        fw_valve_pos_pct
+  blowdown_valve_cmd:  blowdown_valve_pos_pct
+  fault_code:          fault_code
+
+parameters:
+  pressure_sp:    8.0
+  level_sp:       50.0
+  steam_valve_sp: 70.0
+  kp_level:       1.2
+  ff_gain:        30.0
+  max_steam_flow: 3733.0
