@@ -17,7 +17,7 @@ inputs:
   standby_pump_fault:    standby_pump_fault
   process_running:       process_running
   fault_code:            fault_code
-  operator_reset:        fault_code
+  operator_reset:      operator_reset
 
 outputs:
   duty_pump_cmd:     duty_pump_running
