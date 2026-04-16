@@ -61,6 +61,7 @@ class ProcessState:
     # ── Process Status ────────────────────────────────────────────
     process_running:        bool  = False
     fault_code:             int   = 0
+    operator_reset:      bool  = False 
     # 0=OK 1=LOW_WATER 2=OVERPRESSURE 3=FLAME_FAILURE 4=PUMP_FAULT
 
     # ── Thread Lock ───────────────────────────────────────────────
