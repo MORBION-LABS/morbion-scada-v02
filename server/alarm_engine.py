@@ -1,15 +1,25 @@
 """
-MORBION SCADA Server — Alarm Engine
-Aggregates all four process alarm evaluators.
-One responsibility: produce unified alarm list from plant dict.
+alarm_engine.py — MORBION SCADA Server Alarm Engine
+MORBION SCADA v02
+
+KEY FIX FROM v01:
+  v01 imported from alarms.evaluators which duplicated all four
+  alarm classes. evaluators.py has been deleted.
+  v02 imports directly from the individual alarm modules.
+
+One responsibility: produce unified sorted alarm list from plant dict.
+Alarm evaluators never raise — engine catches all exceptions.
 """
 
-from alarms.evaluators import (
-    PumpingStationAlarms,
-    HeatExchangerAlarms,
-    BoilerAlarms,
-    PipelineAlarms,
-)
+import logging
+from alarms.pumping_station import PumpingStationAlarms
+from alarms.heat_exchanger  import HeatExchangerAlarms
+from alarms.boiler          import BoilerAlarms
+from alarms.pipeline        import PipelineAlarms
+
+log = logging.getLogger("alarm_engine")
+
+_SEV_ORDER = {"CRIT": 0, "HIGH": 1, "MED": 2, "LOW": 3}
 
 
 class AlarmEngine:
@@ -22,20 +32,19 @@ class AlarmEngine:
             "pipeline":        PipelineAlarms(),
         }
 
-    def evaluate(self, plant: dict) -> list[dict]:
+    def evaluate(self, plant: dict) -> list:
         """
-        Evaluate all processes. Return sorted alarm list.
-        CRIT first, then HIGH, MED, LOW.
+        Evaluate all four processes.
+        Returns alarm list sorted CRIT → HIGH → MED → LOW.
+        Never raises — all evaluator exceptions caught here.
         """
         alarms = []
         for key, evaluator in self._evaluators.items():
             data = plant.get(key, {})
             try:
                 alarms.extend(evaluator.evaluate(data))
-            except Exception:
-                # Alarm engine must never crash the poller
-                pass
+            except Exception as e:
+                log.error("Alarm evaluator %s failed: %s", key, e)
 
-        _SEV_ORDER = {"CRIT": 0, "HIGH": 1, "MED": 2, "LOW": 3}
         alarms.sort(key=lambda a: _SEV_ORDER.get(a.get("sev", "LOW"), 9))
         return alarms
