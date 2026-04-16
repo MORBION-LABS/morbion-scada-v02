@@ -16,7 +16,7 @@ inputs:
   fw_pump_running:      fw_pump_running
   process_running:      process_running
   fault_code:           fault_code
-  operator_reset:       fault_code    # operator writes 0 to fault_code register
+  operator_reset:      operator_reset
 
 outputs:
   burner_cmd:          burner_state
