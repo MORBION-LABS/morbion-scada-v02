@@ -110,11 +110,13 @@ def apply_operator_writes(write_queue, queue_lock, state, pump,
                 # Force outlet valve position
                 pos = val / 10.0
                 outlet_valve.set_position(pos)
-
+              
             elif reg == 14:
-                # Operator fault reset — write 0 to clear
                 with state:
-                    state.fault_code = int(val)
+                    state.fault_code     = int(val)
+                    # If operator writes 0 — pulse operator_reset for one scan
+                    # This triggers SR latch RESET in ST program correctly
+                    state.operator_reset = (int(val) == 0)
 
         except Exception as e:
             log.error("Error applying write reg=%d val=%d: %s", reg, val, e)
