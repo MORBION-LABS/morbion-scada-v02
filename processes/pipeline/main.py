@@ -118,9 +118,13 @@ def apply_operator_writes(write_queue, queue_lock, state,
                 with state:
                     state.leak_flag = bool(val)
 
+            # REPLACE WITH THIS:
             elif reg == 14:
                 with state:
-                    state.fault_code = int(val)
+                    state.fault_code     = int(val)
+                    # If operator writes 0 — pulse operator_reset for one scan
+                    # This triggers SR latch RESET in ST program correctly
+                    state.operator_reset = (int(val) == 0)
 
         except Exception as e:
             log.error("Error applying write reg=%d val=%d: %s", reg, val, e)
