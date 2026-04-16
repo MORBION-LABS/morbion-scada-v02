@@ -247,6 +247,12 @@ def main():
 
         # 3. PLC scan — ST interpreter executes plc_program.st
         plc.scan(state, dt=scan_interval)
+        # Clear operator_reset after one scan — it is a one-shot pulse
+        # SR latches in ST program saw it. Now clear it.
+        with state:
+            if state.operator_reset:
+                state.operator_reset = False
+
 
         # 4. Apply PLC commands to equipment
         apply_plc_commands(state, duty_pump, standby_pump,
