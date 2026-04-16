@@ -17,6 +17,7 @@ inputs:
   net_flow_m3hr:          net_flow_m3hr
   fault_code:             fault_code
   tank_level_pct:         tank_level_pct
+  operator_reset:      operator_reset
 
 outputs:
   pump_run_cmd:          pump_running
