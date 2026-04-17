@@ -61,52 +61,51 @@ class ModbusClient:
 
     def _transact(self, request: bytes) -> bytes:
         """
-        Open TCP connection, send request, receive response, close.
-        Returns raw response bytes.
-        Raises ModbusError on any failure.
+        Open TCP connection, send request, receive full response, close.
+        Reads MBAP header first to determine exact response length.
+        Then reads exactly that many bytes — works for FC03 and FC06.
         """
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.settimeout(self.timeout)
             s.connect((self.host, self.port))
             s.sendall(request)
-
-            # Read MBAP header first to know response length
+    
+            # Read MBAP header — always exactly 7 bytes
             header = b''
             while len(header) < _MBAP_SIZE:
                 chunk = s.recv(_MBAP_SIZE - len(header))
                 if not chunk:
-                    raise ModbusError("Connection closed by remote host during header read")
+                    raise ModbusError(
+                        "Connection closed during header read")
                 header += chunk
-
-            # Read response - some PLCs send wrong length, so read until we have minimum
-            # Minimum response: FC(1) + byte_count(1) = 2 bytes
+    
+            # MBAP length field tells us exactly how many more bytes
+            # length = number of bytes following (unit_id + PDU)
+            _, _, length, _ = struct.unpack('>HHHB', header)
+            remaining = length - 1   # subtract unit_id already in header
+    
             payload = b''
-            while len(payload) < 2:
-                chunk = s.recv(2 - len(payload))
+            while len(payload) < remaining:
+                chunk = s.recv(remaining - len(payload))
                 if not chunk:
-                    raise ModbusError("Connection closed by remote host during payload read")
+                    raise ModbusError(
+                        "Connection closed during payload read")
                 payload += chunk
-
-            # Get actual byte count and read remaining
-            byte_count = payload[1]
-            needed = byte_count - (len(payload) - 2)
-            while needed > 0:
-                chunk = s.recv(needed)
-                if not chunk:
-                    break
-                payload += chunk
-                needed = byte_count - (len(payload) - 2)
-
+    
             s.close()
             return header + payload
-
+    
         except ModbusError:
             raise
         except socket.timeout:
-            raise ModbusError(f"Timeout after {self.timeout}s connecting to {self.host}:{self.port}")
+            raise ModbusError(
+                f"Timeout after {self.timeout}s "
+                f"connecting to {self.host}:{self.port}")
         except ConnectionRefusedError:
-            raise ModbusError(f"Connection refused — {self.host}:{self.port} not listening")
+            raise ModbusError(
+                f"Connection refused — "
+                f"{self.host}:{self.port} not listening")
         except OSError as e:
             raise ModbusError(f"Network error: {e}")
         finally:
@@ -114,7 +113,6 @@ class ModbusClient:
                 s.close()
             except Exception:
                 pass
-
     def _check_exception(self, response: bytes, expected_fc: int) -> None:
         """
         Check if response is a Modbus exception response.
