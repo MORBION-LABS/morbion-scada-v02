@@ -66,6 +66,7 @@ class ProcessState:
     # ── Process Status ────────────────────────────────────────────
     process_running:         bool  = False
     fault_code:              int   = 0
+    operator_reset:          bool  = False
 
     # ── Thread Lock ───────────────────────────────────────────────
     _lock: threading.Lock = field(
