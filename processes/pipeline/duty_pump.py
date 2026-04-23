@@ -147,11 +147,8 @@ class DutyPump:
         # System curve head at operating point
         self.head_bar = self._H_static_bar + self._k_sys * Q_m3s ** 2
 
-        # Pump delivery head — pump curve at this operating point
-        if Q_max > 0:
-            self._pump_head_bar = H_pump - (H_pump / (Q_max ** 2)) * Q_m3s ** 2
-        else:
-            self._pump_head_bar = 0.0
+        # Pump delivery head
+        self._pump_head_bar = H_pump
 
         # Power and current
         self.flow_m3hr = Q_m3s * 3600.0
