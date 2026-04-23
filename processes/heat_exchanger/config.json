@@ -20,7 +20,7 @@
         "rated_speed_rpm": 1450,
         "rated_flow_lpm": 750,
         "rated_head_bar": 4.5,
-        "setpoint_rpm": 1200,
+        "setpoint_rpm": 800,
         "tau": 8.0
     },
 
@@ -28,7 +28,7 @@
         "rated_speed_rpm": 1450,
         "rated_flow_lpm": 1080,
         "rated_head_bar": 3.8,
-        "setpoint_rpm": 1100,
+        "setpoint_rpm": 700,
         "tau": 8.0
     },
 

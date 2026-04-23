@@ -19,8 +19,8 @@
         "static_head_m": 25.0
     },
     "tank": {
-        "diameter_m": 4.0,
-        "height_m": 4.0,
+        "diameter_m": 1.5,
+        "height_m": 2.0,
         "initial_level_pct": 50.0,
         "demand_flow_m3hr": 60.0
     },
@@ -58,10 +58,10 @@
     "control": {
         "level_start_pct": 20.0,
         "level_stop_pct":  80.0,
-        "dry_run_delay_s": 10.0
+        "dry_run_delay_s": 30.0
     },
     "operating_conditions": {
-        "tank_volume_m3":        50.3,
+        "tank_volume_m3":        3.53,
         "pump_flow_nominal_m3hr": 120.0,
         "demand_flow_m3hr":       60.0,
         "net_fill_rate_m3hr":     60.0
