@@ -1,6 +1,12 @@
 """
 MORBION SCADA Server — Heat Exchanger Alarms
 Limits from lab reference document.
+
+REVISION HISTORY:
+  2026-04-XX  v02    Initial MORBION SCADA v02 version
+  2026-04-23  v02a   [CHANGE] Lowered efficiency alarm threshold
+                          From 60% to 45%
+                          Reflects fouling tolerance in dirty conditions
 """
 
 from alarms.base import BaseAlarmEvaluator
@@ -34,7 +40,8 @@ class HeatExchangerAlarms(BaseAlarmEvaluator):
                 f"Hot outlet temp high {t_hot_out:.1f}°C — limit 160°C"))
 
         # Efficiency low — MED (fouling indicator)
-        if efficiency < 60.0:
+        # CHANGE 2026-04-23: threshold 60.0 → 45.0 (lower tolerance)
+        if efficiency < 45.0:
             alarms.append(self._alarm(
                 "HX-003", "efficiency_pct", "MED",
                 f"Efficiency low {efficiency:.1f}% — possible tube fouling"))

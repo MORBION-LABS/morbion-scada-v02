@@ -3,6 +3,15 @@ process_state.py — Pumping Station
 Central shared state. All equipment reads from and writes to this.
 Live in-memory communication. Persistence handled separately.
 Thread-safe via context manager.
+
+REVISION HISTORY:
+  2026-04-XX  v02    Initial MORBION SCADA v02 version
+  2026-04-23  v02a   Added operator_reset field for fault clearing
+                       Added operator_reset to restore() for persistence
+
+NOTE: operator_reset is a one-shot pulse set by operator control writes
+      (register 14). It triggers SR latch RESET in ST program.
+      Cleared after one scan cycle in main.py.
 """
 
 import threading
@@ -100,3 +109,5 @@ class ProcessState:
         self.pump_starts_today      = data.get("pump_starts_today",         0)
         self.discharge_pressure_bar = data.get("discharge_pressure_bar",  0.0)
         self.fault_code             = data.get("fault_code",               0)
+        # CHANGE 2026-04-23: Also restore operator_reset if present
+        self.operator_reset         = data.get("operator_reset",         False)

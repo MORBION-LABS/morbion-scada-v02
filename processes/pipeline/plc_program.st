@@ -3,6 +3,18 @@
    Kenya Pipeline Company — Petroleum Transfer
    MORBION SCADA v02 — IEC 61131-3 Structured Text
 
+   REVISION HISTORY:
+     2026-04-XX  v02    Initial MORBION SCADA v02 version
+     2026-04-23  v02a   [CHANGE 1] Added VAR block with intermediate variables
+                          - duty_fault_latch SR
+                          - both_fault_latch SR
+                          - overpressure_latch SR
+                          - standby_start_timer TON
+                          - leak_confirm_timer TON
+                          - pressure_recover_tmr TON
+                          - pressure_error REAL
+                          - flow_discrepancy REAL
+
    Control Strategy:
      - Duty pump runs at rated speed
      - Standby pump starts automatically on duty fault
@@ -10,6 +22,12 @@
      - Leak detection via flow balance
      - Overpressure protection — latched interlock
      - Both-fault emergency shutdown
+
+   Fault Codes:
+     0 = OK (normal operation)
+     1 = DUTY_FAULT (duty pump faulted, standby may take over)
+     2 = BOTH_FAULT (both pumps faulted, emergency stop)
+     3 = OVERPRESSURE (>55 bar outlet, latched until cleared)
    ================================================================ *)
 
 VAR
@@ -19,6 +37,9 @@ VAR
     standby_start_timer   : TON;
     leak_confirm_timer    : TON;
     pressure_recover_tmr  : TON;
+    # CHANGE 2026-04-23: Added intermediate variables for calculations
+    pressure_error        : REAL;
+    flow_discrepancy      : REAL;
 END_VAR
 
 (* ── OVERPRESSURE INTERLOCK — latched ────────────────────────── *)

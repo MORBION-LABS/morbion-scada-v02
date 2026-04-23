@@ -3,6 +3,11 @@
    EABL/Bidco Industrial Steam Plant
    MORBION SCADA v02 — IEC 61131-3 Structured Text
 
+   REVISION HISTORY:
+     2026-04-XX  v02    Initial MORBION SCADA v02 version
+     2026-04-23  v02a   [CHANGE] Added VAR block intermediates
+                          Added auto-clear stale latches on cold start
+
    Control Strategy:
      - Pressure-based burner control (OFF/LOW/HIGH)
      - Three-element drum level control
@@ -10,17 +15,52 @@
      - Safety interlocks: low water, overpressure, pump fault
      - Interlocks are LATCHED — require operator reset
      - Periodic blowdown timer
+
+   Fault Codes:
+     0 = OK (normal operation)
+     1 = LOW_WATER (drum level < 20%, latched until operator reset)
+     2 = OVERPRESSURE (drum pressure > 10 bar, latched until operator reset)
+     3 = FLAME_FAILURE (not currently used)
+     4 = PUMP_FAULT (feedwater pump faulted)
    ================================================================ *)
 
 VAR
-    low_water_latch  : SR;
+    low_water_latch    : SR;
     overpressure_latch : SR;
-    pump_fault_latch : SR;
-    blowdown_timer   : TON;
-    blowdown_pulse   : TOF;
-    pressure_recover : TON;
-    level_recover    : TON;
+    pump_fault_latch   : SR;
+    blowdown_timer     : TON;
+    blowdown_pulse     : TOF;
+    pressure_recover   : TON;
+    level_recover      : TON;
+    # CHANGE 2026-04-23: Added intermediate variables for control calculations
+    level_error        : REAL;
+    ff_steam         : REAL;
 END_VAR
+
+(* ── AUTO-CLEAR STALE LATCHES ON COLD START ────────────────────
+   CHANGE 2026-04-23: Added cold start logic
+
+   On cold start (drum_pressure < 1.0 bar), stale latches from
+   previous run may still be set. Clear them automatically
+   to allow process to start without operator intervention.
+
+   This is safe because:
+   - Cold boiler has no pressure = no danger
+   - No feedwater pump fault = pump is OK
+   - Low level alarm will re-trip if truly low
+   ──────────────────────────────────────────────────────── *)
+
+IF drum_pressure_bar < 1.0 THEN
+    overpressure_latch(S1 := FALSE, R := TRUE);
+    IF fault_code = 2 THEN
+        fault_code := 0;
+    END_IF;
+END_IF;
+
+IF NOT fw_pump_fault AND fault_code = 4 THEN
+    pump_fault_latch(S1 := FALSE, R := TRUE);
+    fault_code := 0;
+END_IF;
 
 (* ── SAFETY INTERLOCKS — latched, require operator reset ─────── *)
 

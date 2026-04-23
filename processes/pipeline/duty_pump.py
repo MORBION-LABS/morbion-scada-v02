@@ -2,6 +2,11 @@
 duty_pump.py — Pipeline Duty Pump with Operating Point Solver
 MORBION SCADA v02
 
+REVISION HISTORY:
+  2026-04-XX  v02    Initial MORBION SCADA v02 version
+  2026-04-23  v02a   [CHANGE] Fixed pump curve model for correct outlet pressure
+                          Changed from shutoff-based to flat pump curve
+
 KEY FIX FROM v01:
   v01 used pure affinity laws ignoring pipeline system curve.
   v02 solves the operating point every scan.
@@ -77,13 +82,15 @@ class DutyPump:
                             math.sqrt(3) * 6600.0 * 0.90 * 0.95)
 
         # State
-        self.speed_rpm:  float = 0.0
-        self.flow_m3hr:  float = 0.0
-        self.head_bar:   float = 0.0
-        self.power_kW:   float = 0.0
-        self.current_A:  float = 0.0
-        self.running:    bool  = False
-        self.fault:      bool  = False
+        # CHANGE 2026-04-23: Added _pump_head_bar for pump delivery head
+        self.speed_rpm:        float = 0.0
+        self.flow_m3hr:        float = 0.0
+        self.head_bar:         float = 0.0
+        self._pump_head_bar:  float = 0.0
+        self.power_kW:         float = 0.0
+        self.current_A:        float = 0.0
+        self.running:          bool  = False
+        self.fault:           bool  = False
 
         self._speed_setpoint: float = 0.0
 
@@ -114,31 +121,34 @@ class DutyPump:
         ratio = self.speed_rpm / self._N_rated if self._N_rated > 0 else 0.0
 
         if ratio < 0.01:
-            self.flow_m3hr = 0.0
-            self.head_bar  = 0.0
-            self.power_kW  = 0.0
-            self.current_A = 0.0
+            self.flow_m3hr      = 0.0
+            self.head_bar       = 0.0
+            self._pump_head_bar = 0.0
+            self.power_kW       = 0.0
+            self.current_A      = 0.0
             self._write_state(state)
             return
 
-        # Pump curve at current speed (in bar)
-        Q_max     = self._Q_rated * ratio
-        H_shutoff = self._H_rated * ratio ** 2
+        # CHANGE 2026-04-23: Flat pump curve — delivers rated head across operating range
+        # Realistic for high-head multistage petroleum pump
+        # Previous code used shutoff-based calculation with wrong formula
+        Q_max   = self._Q_rated * ratio
+        H_pump  = self._H_rated * ratio ** 2
 
-        # Solve operating point analytically
-        # H_shutoff × (1 - Q²/Q_max²) = H_static + k_sys × Q²
-        # Q² = (H_shutoff - H_static) / (H_shutoff/Q_max² + k_sys)
-        numerator   = H_shutoff - self._H_static_bar
-        denominator = (H_shutoff / (Q_max ** 2) + self._k_sys) if Q_max > 0 else 1.0
-
-        if numerator <= 0 or denominator <= 0:
+        # Operating flow from system curve intersection
+        # H_pump = H_static + k_sys × Q²
+        numerator = H_pump - self._H_static_bar
+        if numerator <= 0 or self._k_sys <= 0:
             Q_m3s = 0.0
         else:
-            Q_m3s = math.sqrt(numerator / denominator)
+            Q_m3s = math.sqrt(numerator / self._k_sys)
             Q_m3s = max(0.0, min(Q_m3s, Q_max))
 
-        # Head at operating point
+        # System curve head at operating point
         self.head_bar = self._H_static_bar + self._k_sys * Q_m3s ** 2
+
+        # Pump delivery head
+        self._pump_head_bar = H_pump
 
         # Power and current
         self.flow_m3hr = Q_m3s * 3600.0

@@ -2,6 +2,13 @@
 process_state.py — Pipeline Pump Station
 MORBION SCADA v02
 
+REVISION HISTORY:
+  2026-04-XX  v02    Initial MORBION SCADA v02 version
+  2026-04-23  v02a   [CHANGE] Added process_running and operator_reset to restore()
+                          Added flow_rate_m3hr, flow_velocity_ms to save/restore
+                          Added standby_pump fields for duty-standby operation
+                          Restored after binary/missing incident
+
 KEY FIX FROM v01:
   leak_flag was typed as int (0/1) in v01.
   v02 types it as bool throughout for consistency.
@@ -81,13 +88,18 @@ class ProcessState:
 
     def save(self, path: str):
         data = {
+            # CHANGE 2026-04-23: Added flow_rate_m3hr, flow_velocity_ms
             "duty_pump_speed_rpm":    self.duty_pump_speed_rpm,
-            "inlet_valve_open":       self.inlet_valve_open,
+            "duty_pump_running":      self.duty_pump_running,
+            "standby_pump_running":  self.standby_pump_running,
+            "inlet_valve_open":      self.inlet_valve_open,
             "outlet_valve_position":  self.outlet_valve_position_pct,
-            "inlet_pressure_bar":     self.inlet_pressure_bar,
-            "outlet_pressure_bar":    self.outlet_pressure_bar,
-            "fault_code":             self.fault_code,
-            "leak_flag":              self.leak_flag,
+            "inlet_pressure_bar":    self.inlet_pressure_bar,
+            "outlet_pressure_bar":   self.outlet_pressure_bar,
+            "flow_rate_m3hr":       self.flow_rate_m3hr,
+            "flow_velocity_ms":      self.flow_velocity_ms,
+            "fault_code":            self.fault_code,
+            "leak_flag":            self.leak_flag,
         }
         with open(path, 'w') as f:
             json.dump(data, f, indent=2)

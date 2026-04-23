@@ -3,6 +3,10 @@ process_state.py — Boiler Steam Generation
 Central shared state. All equipment reads from and writes to this.
 Live in-memory communication. Persistence handled separately.
 Thread-safe via context manager.
+
+REVISION HISTORY:
+  2026-04-XX  v02    Initial MORBION SCADA v02 version
+  2026-04-23  v02a   Restored after accidental deletion
 """
 
 import threading

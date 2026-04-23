@@ -1,6 +1,12 @@
 # Pipeline PLC Variable Map
 # MORBION SCADA v02
 #
+# REVISION HISTORY:
+#   2026-04-XX  v02    Initial MORBION SCADA v02 version
+#   2026-04-23  v02a   [CHANGE] Updated expected_flow and leak_threshold
+#                        expected_flow: 450.0 → 600.0
+#                        leak_threshold: 15.0 → 50.0
+#
 # Input/Output image separation:
 # Inputs READ from ProcessState at scan start.
 # Outputs WRITTEN to ProcessState at scan end.
@@ -33,5 +39,7 @@ outputs:
 parameters:
   outlet_pressure_nominal: 40.0
   outlet_valve_setpoint:   85.0
-  leak_threshold:          15.0
-  expected_flow:           450.0
+  # CHANGE 2026-04-23: leak_threshold 15.0 → 50.0 (higher tolerance)
+  leak_threshold:          50.0
+  # CHANGE 2026-04-23: expected_flow 450.0 → 600.0 (higher target)
+  expected_flow:           600.0

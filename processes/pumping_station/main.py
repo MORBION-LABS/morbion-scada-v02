@@ -2,6 +2,17 @@
 main.py — Pumping Station Entry Point
 MORBION SCADA v02
 
+REVISION HISTORY:
+  2026-04-XX  v02    Initial MORBION SCADA v02 version
+  2026-04-23  v02a   [CHANGE 1] Fixed apply_plc_commands() pump speed
+                          Pump now gets setpoint_rpm on start command
+                     [CHANGE 2] Fixed inlet valve control
+                          Register 8 now uses open()/close() not set_position()
+                          (set_position() crashes on InletValve which only has open/close)
+                     [CHANGE 3] Fixed scan loop order
+                          Tank runs LAST so it reads updated valve positions
+                          (outlet valve position affects flow, tank then calculates level)
+
 KEY CHANGES FROM v01:
   - write_queue: FC06 writes from Modbus server are queued here
   - apply_operator_writes(): dequeued at start of every scan cycle
@@ -102,9 +113,13 @@ def apply_operator_writes(write_queue, queue_lock, state, pump,
                     pump.stop()
 
             elif reg == 8:
-                # Force inlet valve position
-                pos = val / 10.0
-                inlet_valve.set_position(pos)
+                # CHANGE 2026-04-23: Force inlet valve — open if >50%, close if <=50%
+                # NOTE: InletValve only has open()/close() methods, not set_position()
+                # Using set_position() would crash. Previous code incorrectly used it.
+                if val > 500:
+                    inlet_valve.open()
+                else:
+                    inlet_valve.close()
 
             elif reg == 9:
                 # Force outlet valve position
@@ -131,15 +146,19 @@ def apply_plc_commands(state, pump, inlet_valve, outlet_valve):
     This function reads those command fields and drives equipment.
     This is the input/output image separation — PLC sets commands,
     main.py applies them to physical equipment objects.
+
+    CHANGE 2026-04-23: Added pump.set_speed() on start command.
+    Previously pump started but speed was not set, causing zero flow.
     """
     with state:
         pump_cmd        = state.pump_running
         inlet_cmd       = state.inlet_valve_open
         outlet_sp       = state.outlet_valve_pos_pct
 
-    # Pump command
+    # Pump command — CHANGE: Added set_speed on start
     if pump_cmd and not pump.running:
         pump.start()
+        pump.set_speed(load_config()["pump"]["setpoint_rpm"])
     elif not pump_cmd and pump.running:
         pump.stop()
 
@@ -224,14 +243,17 @@ def main():
         apply_operator_writes(write_queue, queue_lock, state,
                               pump, inlet_valve, outlet_valve)
 
-        # 2. Physics update — all equipment
+        # 2. Physics update — tank runs LAST so it reads updated valve positions
+        # CHANGE 2026-04-23: Tank update moved to end of physics block
+        # Outlet valve position affects flow, then tank calculates level from flow.
+        # Old order: tank updated before valve, causing stale level calc.
         pump.update(scan_interval,            state)
-        tank.update(scan_interval,            state)
         inlet_valve.update(scan_interval,     state)
         outlet_valve.update(scan_interval,    state)
         flow_meter.update(scan_interval,      state)
         level_sensor.update(scan_interval,    state)
         pressure_sensor.update(scan_interval, state)
+        tank.update(scan_interval,            state)
 
         # 3. PLC scan — ST interpreter executes plc_program.st
         plc.scan(state, dt=scan_interval)

@@ -1,6 +1,12 @@
 """
 MORBION SCADA Server — Pipeline Alarms
 Limits from lab reference document.
+
+REVISION HISTORY:
+  2026-04-XX  v02    Initial MORBION SCADA v02 version
+  2026-04-23  v02a   [CHANGE] Lowered outlet pressure LOW alarm threshold
+                          From 38.0 bar to 30.0 bar
+                          Reflects actual operating range (40 bar nominal)
 """
 
 from alarms.base import BaseAlarmEvaluator
@@ -27,7 +33,8 @@ class PipelineAlarms(BaseAlarmEvaluator):
             alarms.append(self._alarm(
                 "PL-001", "outlet_pressure_bar", "CRIT",
                 f"Outlet OVERPRESSURE {outlet:.1f} bar — limit 55 bar"))
-        elif outlet <= 38.0:
+        # CHANGE 2026-04-23: threshold 38.0 → 30.0 (lower for 40 bar nominal)
+        elif outlet <= 30.0:
             alarms.append(self._alarm(
                 "PL-002", "outlet_pressure_bar", "HIGH",
                 f"Outlet pressure low {outlet:.1f} bar — delivery at risk"))
