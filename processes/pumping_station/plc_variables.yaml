@@ -1,17 +1,5 @@
 # Pumping Station PLC Variable Map
 # MORBION SCADA v02
-#
-# REVISION HISTORY:
-#   2026-04-XX  v02    Initial MORBION SCADA v02 version
-#   2026-04-23  v02a   [CHANGE] Added process_running to inputs
-#                        Enables PLC to check if process is running
-#
-# inputs:     read from ProcessState at start of each scan
-# outputs:    written back to ProcessState at end of each scan
-# parameters: constants injected into the ST environment
-#
-# ST variable names are case-insensitive — stored uppercase internally.
-# state_field names must exactly match ProcessState dataclass fields.
 
 inputs:
   level_sensor_pct:       level_sensor_pct
@@ -22,9 +10,8 @@ inputs:
   net_flow_m3hr:          net_flow_m3hr
   fault_code:             fault_code
   tank_level_pct:         tank_level_pct
-  operator_reset:      operator_reset
-  # CHANGE 2026-04-23: Added process_running - enables PLC to check if process is running
-  process_running:      process_running
+  operator_reset:         operator_reset
+  process_running:        process_running
 
 outputs:
   pump_run_cmd:          pump_running
@@ -36,4 +23,3 @@ outputs:
 parameters:
   level_start: 20.0
   level_stop:  80.0
-  dry_run_delay: 30.0
