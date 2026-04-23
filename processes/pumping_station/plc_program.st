@@ -2,13 +2,6 @@
    PUMPING STATION PLC PROGRAM
    Nairobi Water Municipal Pumping Station
    MORBION SCADA v02 — IEC 61131-3 Structured Text
-
-   Control Strategy:
-     - Level-based pump start/stop with LATCHED commands
-     - Pump stays ON between start and stop thresholds
-     - Dry run protection with TON timer
-     - Outlet valve modulation on alarms
-     - Fault recovery via operator_reset
    ================================================================ *)
 
 VAR
@@ -65,14 +58,11 @@ IF NOT process_running THEN
 END_IF;
 
 (* ── LEVEL CONTROL — latched start/stop ──────────────────────── *)
-(* Start pump when level falls to start threshold                 *)
 
 IF level_sensor_pct < level_start AND fault_code = 0 THEN
     pump_run_cmd    := TRUE;
     inlet_valve_cmd := TRUE;
 END_IF;
-
-(* Stop pump when level reaches stop threshold                    *)
 
 IF level_sensor_pct > level_stop THEN
     pump_run_cmd    := FALSE;
@@ -95,7 +85,7 @@ END_IF;
 
 (* ── DRY RUN PROTECTION ───────────────────────────────────────── *)
 
-dry_run_timer(IN := pump_running AND flow_m3hr < 5.0, PT := 10.0);
+dry_run_timer(IN := pump_running AND flow_m3hr < 5.0, PT := 30.0);
 
 IF dry_run_timer.Q THEN
     pump_run_cmd    := FALSE;
