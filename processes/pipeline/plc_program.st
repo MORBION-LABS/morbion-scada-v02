@@ -37,7 +37,6 @@ VAR
     standby_start_timer   : TON;
     leak_confirm_timer    : TON;
     pressure_recover_tmr  : TON;
-    # CHANGE 2026-04-23: Added intermediate variables for calculations
     pressure_error        : REAL;
     flow_discrepancy      : REAL;
 END_VAR
