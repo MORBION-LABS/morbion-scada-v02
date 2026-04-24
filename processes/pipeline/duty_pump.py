@@ -35,6 +35,11 @@ Physics:
     I_rated = P_rated / (√3 × 6600 × PF × η_motor)
 """
 
+"""
+duty_pump.py — Pipeline Duty Pump with Operating Point Solver
+MORBION SCADA v02
+"""
+
 import math
 import random
 
@@ -45,52 +50,42 @@ class DutyPump:
         cfg      = config["duty_pump"]
         pipe_cfg = config["pipeline"]
 
-        # Nameplate
         self._N_rated = cfg["rated_speed_rpm"]
-        self._Q_rated = cfg["rated_flow_m3hr"] / 3600.0     # m³/s
-        self._H_rated = cfg["rated_head_bar"]                # bar
+        self._Q_rated = cfg["rated_flow_m3hr"] / 3600.0
+        self._H_rated = cfg["rated_head_bar"]
         self._eta     = cfg["rated_efficiency"]
         self._tau     = cfg["tau"]
         self._SG      = cfg["specific_gravity"]
-        self._rho     = self._SG * 1000.0                   # kg/m³
+        self._rho     = self._SG * 1000.0
 
-        # Pipeline geometry
         self._D    = pipe_cfg["diameter_m"]
         self._L    = pipe_cfg["length_m"]
         self._f    = pipe_cfg["friction_factor"]
         self._elev = pipe_cfg["elevation_m"]
         self._A    = math.pi / 4.0 * self._D ** 2
 
-        # Static head in bar (elevation loss for petroleum product)
         self._H_static_bar = (self._rho * 9.81 * self._elev) / 1e5
 
-        # Darcy-Weisbach system curve coefficient in bar/(m³/s)²
-        # H_friction_bar = k_sys × Q²
         if self._A > 0:
             self._k_sys = (self._f * (self._L / self._D) *
                            self._rho / (2.0 * self._A ** 2)) / 1e5
         else:
             self._k_sys = 0.0
 
-        # Rated power and motor current
-        # P_shaft = ρ × g × Q × H_m / η
-        # H_m = H_bar × 1e5 / (ρ × g)
         H_rated_m = self._H_rated * 1e5 / (self._rho * 9.81)
         self._P_rated_kW = (self._rho * 9.81 *
                             self._Q_rated * H_rated_m) / (self._eta * 1000.0)
         self._I_rated_A  = self._P_rated_kW * 1000.0 / (
                             math.sqrt(3) * 6600.0 * 0.90 * 0.95)
 
-        # State
-        # CHANGE 2026-04-23: Added _pump_head_bar for pump delivery head
-        self.speed_rpm:        float = 0.0
-        self.flow_m3hr:        float = 0.0
-        self.head_bar:         float = 0.0
-        self._pump_head_bar:  float = 0.0
-        self.power_kW:         float = 0.0
-        self.current_A:        float = 0.0
-        self.running:          bool  = False
-        self.fault:           bool  = False
+        self.speed_rpm:      float = 0.0
+        self.flow_m3hr:      float = 0.0
+        self.head_bar:       float = 0.0
+        self._pump_head_bar: float = 0.0
+        self.power_kW:       float = 0.0
+        self.current_A:      float = 0.0
+        self.running:        bool  = False
+        self.fault:          bool  = False
 
         self._speed_setpoint: float = 0.0
 
@@ -109,7 +104,6 @@ class DutyPump:
             self._write_state(state)
             return
 
-        # Speed dynamics
         if not self.running:
             self.speed_rpm = max(
                 0.0, self.speed_rpm - (self._N_rated / self._tau) * dt)
@@ -129,14 +123,11 @@ class DutyPump:
             self._write_state(state)
             return
 
-        # CHANGE 2026-04-23: Flat pump curve — delivers rated head across operating range
-        # Realistic for high-head multistage petroleum pump
-        # Previous code used shutoff-based calculation with wrong formula
-        Q_max   = self._Q_rated * ratio
-        H_pump  = self._H_rated * ratio ** 2
+        # Flat pump curve — delivers rated head across operating range
+        Q_max  = self._Q_rated * ratio
+        H_pump = self._H_rated * ratio ** 2
 
         # Operating flow from system curve intersection
-        # H_pump = H_static + k_sys × Q²
         numerator = H_pump - self._H_static_bar
         if numerator <= 0 or self._k_sys <= 0:
             Q_m3s = 0.0
@@ -144,21 +135,16 @@ class DutyPump:
             Q_m3s = math.sqrt(numerator / self._k_sys)
             Q_m3s = max(0.0, min(Q_m3s, Q_max))
 
-        # System curve head at operating point
-        self.head_bar = self._H_static_bar + self._k_sys * Q_m3s ** 2
-
-        # Pump delivery head
+        self.head_bar       = self._H_static_bar + self._k_sys * Q_m3s ** 2
         self._pump_head_bar = H_pump
+        self.flow_m3hr      = Q_m3s * 3600.0
+        self.power_kW       = self._P_rated_kW * ratio ** 3
+        self.current_A      = self._I_rated_A  * ratio ** 2
 
-        # Power and current
-        self.flow_m3hr = Q_m3s * 3600.0
-        self.power_kW  = self._P_rated_kW * ratio ** 3
-        self.current_A = self._I_rated_A  * ratio ** 2
-
-        # Noise
-        self.flow_m3hr = max(0.0, self.flow_m3hr + random.gauss(0, 1.5))
-        self.head_bar  = max(0.0, self.head_bar  + random.gauss(0, 0.05))
-        self.current_A = max(0.0, self.current_A + random.gauss(0, 0.2))
+        self.flow_m3hr      = max(0.0, self.flow_m3hr + random.gauss(0, 1.5))
+        self.head_bar       = max(0.0, self.head_bar  + random.gauss(0, 0.05))
+        self._pump_head_bar = max(0.0, self._pump_head_bar + random.gauss(0, 0.05))
+        self.current_A      = max(0.0, self.current_A + random.gauss(0, 0.2))
 
         self._write_state(state)
 
@@ -169,7 +155,7 @@ class DutyPump:
             state.duty_pump_fault     = self.fault
             state.duty_pump_current_A = self.current_A
             state.duty_pump_power_kW  = self.power_kW
-            state.duty_pump_head_bar  = self.head_bar
+            state.duty_pump_head_bar  = self._pump_head_bar
             state.flow_rate_m3hr      = self.flow_m3hr
             if self._A > 0:
                 state.flow_velocity_ms = (self.flow_m3hr / 3600.0) / self._A
