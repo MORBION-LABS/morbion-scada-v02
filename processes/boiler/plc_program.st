@@ -32,7 +32,6 @@ VAR
     blowdown_pulse     : TOF;
     pressure_recover   : TON;
     level_recover      : TON;
-    # CHANGE 2026-04-23: Added intermediate variables for control calculations
     level_error        : REAL;
     ff_steam         : REAL;
 END_VAR
