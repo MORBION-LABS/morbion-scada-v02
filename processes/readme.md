@@ -32,8 +32,8 @@ Each part — processes, server, clients — is independent. The processes run o
 
 ```
 ┌─────────────────────────────────────┐
-│         PLC VM (ubuntu-plc)         │
-│         192.168.100.20              │
+│         PLC MACHINE                 │
+│         <plc ip>                    │
 │                                     │
 │  ┌────────┐  ┌────────┐             │
 │  │Pumping │  │  Heat  │             │
@@ -50,8 +50,8 @@ Each part — processes, server, clients — is independent. The processes run o
          │ Modbus TCP
          ▼
 ┌─────────────────────────────────────┐
-│       Server VM (ubuntu-server)     │
-│         192.168.100.30              │
+│       Server MACHINE                │
+│         <server ip>                 │
 │                                     │
 │  SCADA Server :5000                 │
 │  REST + WebSocket + Alarm Engine    │
@@ -59,8 +59,8 @@ Each part — processes, server, clients — is independent. The processes run o
          │ HTTP / WebSocket
          ▼
 ┌─────────────────────────────────────┐
-│         Windows Host / Clients      │
-│         192.168.100.10              │
+│         Client                      │
+│         <client ip>                 │
 │                                     │
 │  Desktop SCADA Client               │
 │  Web Browser Client                 │
@@ -163,14 +163,14 @@ Normal operation:
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/MORBION-LABS/morbion-scada-v02.git
+git sparse https://github.com/MORBION-LABS/morbion-scada-v02.git
 cd morbion-scada-v02/processes
 ```
 
 ### 2. Install Python dependencies
 
 ```bash
-pip3 install pyyaml psutil
+pip3 install -r requirements
 ```
 
 ### 3. Run the installer
