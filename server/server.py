@@ -27,9 +27,26 @@ Architecture:
   Those live in poller.py, alarm_engine.py, and the processes.
 """
 
+"""
+server.py — MORBION SCADA Flask HTTP + WebSocket Layer
+MORBION SCADA v02
+
+KEY CHANGES FROM v01:
+  - /data/alarms route fixed — defined BEFORE /data/<process>
+  - PLC API endpoints proxy to process secondary HTTP ports:
+      pumping_station: :5020
+      heat_exchanger:  :5060
+      boiler:          :5070
+      pipeline:        :5080
+  - Alarm acknowledgment endpoints
+  - MQTT publisher wired in via init_server()
+"""
+
 import json
 import threading
 import logging
+import urllib.request
+import urllib.error
 from datetime import datetime
 
 from flask      import Flask, jsonify, request
@@ -44,22 +61,20 @@ CORS(app, origins="*")
 sock = Sock(app)
 
 # Module-level refs — set by init_server()
-_state:      PlantState  = None
-_plc_host:   str         = ""
-_mqtt:       object      = None   # MQTTPublisher or None
-_plc_runtimes: dict      = {}     # process_name → PLCRuntime (optional, for API)
+_state:    PlantState = None
+_plc_host: str        = ""
+_mqtt:     object     = None
 
 # WebSocket client registry
 _ws_clients: set            = set()
 _ws_lock:    threading.Lock = threading.Lock()
 
 # Alarm acknowledgment store
-# key: alarm_id, value: {"acked": bool, "acked_at": str, "acked_by": str}
-_alarm_ack_store: dict      = {}
+_alarm_ack_store: dict          = {}
 _ack_lock:        threading.Lock = threading.Lock()
 
 # Alarm history — last 200 alarms
-_alarm_history: list        = []
+_alarm_history: list           = []
 _history_lock:  threading.Lock = threading.Lock()
 _HISTORY_MAX = 200
 
@@ -77,18 +92,25 @@ _MAX_REG = {
     "pipeline":        14,
 }
 
+# Secondary HTTP ports — PLC API per process
+_PLC_HTTP_PORTS = {
+    "pumping_station": 5020,
+    "heat_exchanger":  5060,
+    "boiler":          5070,
+    "pipeline":        5080,
+}
+
 
 def init_server(state: PlantState, plc_host: str,
                 mqtt_publisher=None, plc_runtimes: dict = None) -> None:
-    global _state, _plc_host, _mqtt, _plc_runtimes
-    _state        = state
-    _plc_host     = plc_host
-    _mqtt         = mqtt_publisher
-    _plc_runtimes = plc_runtimes or {}
+    global _state, _plc_host, _mqtt
+    _state    = state
+    _plc_host = plc_host
+    _mqtt     = mqtt_publisher
+    # plc_runtimes ignored — proxy pattern replaces direct access
 
 
 def broadcast(payload: str) -> None:
-    """Push JSON string to all connected WebSocket clients."""
     dead = set()
     with _ws_lock:
         for ws in list(_ws_clients):
@@ -100,7 +122,6 @@ def broadcast(payload: str) -> None:
 
 
 def _update_alarm_history(alarms: list) -> None:
-    """Called by poller or broadcast loop to maintain alarm history."""
     with _history_lock:
         for alarm in alarms:
             aid = alarm.get("id")
@@ -108,6 +129,72 @@ def _update_alarm_history(alarms: list) -> None:
                 _alarm_history.append(dict(alarm))
                 if len(_alarm_history) > _HISTORY_MAX:
                     _alarm_history.pop(0)
+
+
+# ── PLC Proxy Helper ───────────────────────────────────────────────────────────
+
+def _plc_proxy_get(process: str, endpoint: str):
+    """
+    HTTP GET to process secondary PLC API.
+    Returns (data, error_dict, status_code).
+    data is parsed JSON or raw text depending on endpoint.
+    """
+    port = _PLC_HTTP_PORTS.get(process)
+    if port is None:
+        return None, {"error": f"No PLC HTTP port for {process}"}, 404
+
+    url = f"http://{_plc_host}:{port}{endpoint}"
+    try:
+        req  = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            raw = resp.read().decode()
+            # /plc/program returns plain text
+            if endpoint == "/plc/program":
+                return raw, None, 200
+            return json.loads(raw), None, 200
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        try:
+            return None, json.loads(body), e.code
+        except Exception:
+            return None, {"error": body}, e.code
+    except urllib.error.URLError as e:
+        return None, {"error": f"Process unreachable: {e.reason}"}, 503
+    except Exception as e:
+        return None, {"error": str(e)}, 500
+
+
+def _plc_proxy_post(process: str, endpoint: str, body: dict = None):
+    """
+    HTTP POST to process secondary PLC API.
+    Returns (data, error_dict, status_code).
+    """
+    port = _PLC_HTTP_PORTS.get(process)
+    if port is None:
+        return None, {"error": f"No PLC HTTP port for {process}"}, 404
+
+    url      = f"http://{_plc_host}:{port}{endpoint}"
+    payload  = json.dumps(body or {}).encode()
+    try:
+        req = urllib.request.Request(
+            url,
+            data    = payload,
+            method  = "POST",
+            headers = {"Content-Type": "application/json",
+                       "Content-Length": str(len(payload))},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read().decode()), None, 200
+    except urllib.error.HTTPError as e:
+        body_raw = e.read().decode()
+        try:
+            return None, json.loads(body_raw), e.code
+        except Exception:
+            return None, {"error": body_raw}, e.code
+    except urllib.error.URLError as e:
+        return None, {"error": f"Process unreachable: {e.reason}"}, 503
+    except Exception as e:
+        return None, {"error": str(e)}, 500
 
 
 # ── REST — System ──────────────────────────────────────────────────────────────
@@ -156,33 +243,26 @@ def data_all():
     return jsonify(_state.snapshot())
 
 
-# CRITICAL: /data/alarms MUST be defined BEFORE /data/<process>
-# Flask matches routes in definition order.
-# If /data/<process> comes first, "alarms" is captured as process name
-# and returns 404 because "alarms" is not a valid process.
 @app.route("/data/alarms")
 def data_alarms():
     snap   = _state.snapshot()
     alarms = snap.get("alarms", [])
-
-    # Annotate with acknowledgment status
     with _ack_lock:
         annotated = []
         for alarm in alarms:
-            a    = dict(alarm)
-            aid  = a.get("id", "")
-            ack  = _alarm_ack_store.get(aid, {})
-            a["acked"]    = ack.get("acked", False)
+            a   = dict(alarm)
+            aid = a.get("id", "")
+            ack = _alarm_ack_store.get(aid, {})
+            a["acked"]    = ack.get("acked",    False)
             a["acked_at"] = ack.get("acked_at", "")
+            a["acked_by"] = ack.get("acked_by", "")
             annotated.append(a)
-
     return jsonify(annotated)
 
 
 @app.route("/data/<process>")
 def data_process(process: str):
-    valid = tuple(_PORT_MAP.keys())
-    if process not in valid:
+    if process not in _PORT_MAP:
         return jsonify({"error": f"Unknown process '{process}'"}), 404
     return jsonify(_state.snapshot().get(process, {}))
 
@@ -191,11 +271,6 @@ def data_process(process: str):
 
 @app.route("/control", methods=["POST"])
 def control():
-    """
-    Write a single Modbus register via FC06.
-    Body: {process, register, value}
-    This is the endpoint the desktop client and web client both use.
-    """
     if not request.is_json:
         return jsonify({"ok": False,
                         "error": "Content-Type must be application/json"}), 400
@@ -214,8 +289,7 @@ def control():
 
     if process not in _PORT_MAP:
         return jsonify({"ok": False,
-                        "error": f"Unknown process '{process}'. "
-                                 f"Valid: {list(_PORT_MAP.keys())}"}), 400
+                        "error": f"Unknown process '{process}'"}), 400
 
     if not isinstance(register, int) or not isinstance(value, int):
         return jsonify({"ok": False,
@@ -251,7 +325,7 @@ def control():
         return jsonify({
             "ok":      False,
             "process": process,
-            "register":register,
+            "register": register,
             "value":   value,
             "error":   str(e),
         }), 500
@@ -261,24 +335,17 @@ def control():
 
 @app.route("/alarms/ack", methods=["POST"])
 def alarms_ack():
-    """
-    Acknowledge one alarm or all active alarms.
-    Body: {"alarm_id": "PS-001"} or {"alarm_id": "all"}
-    Optional: {"operator": "JohnDoe"}
-    """
-    body = request.get_json(silent=True) or {}
+    body     = request.get_json(silent=True) or {}
     alarm_id = body.get("alarm_id", "")
     operator = body.get("operator", "OPERATOR")
 
     if not alarm_id:
-        return jsonify({"ok": False,
-                        "error": "alarm_id required"}), 400
+        return jsonify({"ok": False, "error": "alarm_id required"}), 400
 
-    now  = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-    snap = _state.snapshot()
+    now          = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    snap         = _state.snapshot()
     active_alarms = snap.get("alarms", [])
-
-    acked_ids = []
+    acked_ids    = []
 
     with _ack_lock:
         if alarm_id.lower() == "all":
@@ -305,114 +372,82 @@ def alarms_ack():
 
 @app.route("/alarms/history")
 def alarms_history():
-    """Return recent alarm history — last 200 alarm events."""
     with _history_lock:
         return jsonify(list(_alarm_history))
 
 
-# ── REST — PLC API ─────────────────────────────────────────────────────────────
+# ── REST — PLC API (proxy to process secondary HTTP) ──────────────────────────
 
 @app.route("/plc/<process>/program", methods=["GET"])
 def plc_get_program(process: str):
-    """Get ST program source for a process."""
     if process not in _PORT_MAP:
         return jsonify({"error": f"Unknown process '{process}'"}), 404
 
-    runtime = _plc_runtimes.get(process)
-    if runtime is None:
-        return jsonify({"error": "PLC runtime not available for this process"}), 503
+    source, err, code = _plc_proxy_get(process, "/plc/program")
+    if err:
+        return jsonify(err), code
 
+    status, _, _ = _plc_proxy_get(process, "/plc/status")
     return jsonify({
         "process": process,
-        "source":  runtime.program_source,
-        "status":  runtime.status,
+        "source":  source,
+        "status":  status or {},
     })
 
 
 @app.route("/plc/<process>/program", methods=["POST"])
 def plc_upload_program(process: str):
-    """
-    Upload new ST program source.
-    Validates syntax before applying.
-    Body: {"source": "...ST program text..."}
-    """
     if process not in _PORT_MAP:
         return jsonify({"error": f"Unknown process '{process}'"}), 404
 
-    runtime = _plc_runtimes.get(process)
-    if runtime is None:
-        return jsonify({"error": "PLC runtime not available"}), 503
-
-    body = request.get_json(silent=True) or {}
+    body   = request.get_json(silent=True) or {}
     source = body.get("source", "")
-
     if not source:
         return jsonify({"ok": False, "error": "source field required"}), 400
 
-    success = runtime.upload_program(source)
-
-    if success:
-        log.info("PLC program uploaded for %s", process)
-        return jsonify({"ok": True, "process": process,
-                        "status": runtime.status})
-    else:
-        return jsonify({"ok": False, "process": process,
-                        "error": runtime.status.get("last_error", "Upload failed"),
-                        "status": runtime.status}), 400
+    data, err, code = _plc_proxy_post(process, "/plc/program", {"source": source})
+    if err:
+        return jsonify(err), code
+    return jsonify(data)
 
 
 @app.route("/plc/<process>/program/reload", methods=["POST"])
 def plc_reload_program(process: str):
-    """Hot reload ST program from file on disk."""
     if process not in _PORT_MAP:
         return jsonify({"error": f"Unknown process '{process}'"}), 404
 
-    runtime = _plc_runtimes.get(process)
-    if runtime is None:
-        return jsonify({"error": "PLC runtime not available"}), 503
-
-    runtime.reload()
-    log.info("PLC program reloaded for %s", process)
-    return jsonify({"ok": True, "process": process,
-                    "status": runtime.status})
+    data, err, code = _plc_proxy_post(process, "/plc/program/reload")
+    if err:
+        return jsonify(err), code
+    return jsonify(data)
 
 
 @app.route("/plc/<process>/status", methods=["GET"])
 def plc_status(process: str):
-    """Get PLC runtime status for a process."""
     if process not in _PORT_MAP:
         return jsonify({"error": f"Unknown process '{process}'"}), 404
 
-    runtime = _plc_runtimes.get(process)
-    if runtime is None:
-        return jsonify({"error": "PLC runtime not available"}), 503
-
-    return jsonify({"process": process, "status": runtime.status})
+    data, err, code = _plc_proxy_get(process, "/plc/status")
+    if err:
+        return jsonify(err), code
+    return jsonify({"process": process, "status": data})
 
 
 @app.route("/plc/<process>/variables", methods=["GET"])
 def plc_variables(process: str):
-    """Get PLC variable map (inputs/outputs/parameters) for a process."""
     if process not in _PORT_MAP:
         return jsonify({"error": f"Unknown process '{process}'"}), 404
 
-    runtime = _plc_runtimes.get(process)
-    if runtime is None:
-        return jsonify({"error": "PLC runtime not available"}), 503
-
-    return jsonify({"process": process, "variables": runtime.variables})
+    data, err, code = _plc_proxy_get(process, "/plc/variables")
+    if err:
+        return jsonify(err), code
+    return jsonify({"process": process, "variables": data})
 
 
 # ── WebSocket ──────────────────────────────────────────────────────────────────
 
 @sock.route("/ws")
 def ws_endpoint(ws):
-    """
-    WebSocket endpoint.
-    On connect: send current state immediately.
-    Stays open: client sends keep-alive pings, server ignores content.
-    On disconnect: remove from registry.
-    """
     with _ws_lock:
         _ws_clients.add(ws)
 
@@ -431,5 +466,4 @@ def ws_endpoint(ws):
     finally:
         with _ws_lock:
             _ws_clients.discard(ws)
-
       
