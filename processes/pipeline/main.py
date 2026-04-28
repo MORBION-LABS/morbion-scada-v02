@@ -210,6 +210,11 @@ def main():
     modbus = ModbusServer(config, write_callback=on_modbus_write)
     modbus.start()
 
+    # ── PLC HTTP API ──────────────────────────────────────────────
+    from shared.plc_http import PLCHttpServer
+    plc_http = PLCHttpServer(plc, port=5080)
+    plc_http.start()
+  
     # ── Start ─────────────────────────────────────────────────────
     with state:
         state.process_running = True
@@ -278,6 +283,7 @@ def main():
     duty_pump.stop()
     standby_pump.stop()
     modbus.stop()
+    plc_http.stop()
     state.save(STATE_PATH)
     log.info("Pipeline pump station stopped cleanly")
     sys.exit(0)
