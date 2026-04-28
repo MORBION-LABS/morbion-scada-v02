@@ -17,173 +17,161 @@ Architecture:
   from destroying the QObject before the signal can be emitted.
 """
 
-import httpx
+"""
+rest_client.py — MORBION SCADA REST Client
+MORBION SCADA v02
+"""
+
+import json
 import logging
-from PyQt6.QtCore import QObject, QRunnable, QThreadPool, pyqtSignal
+import urllib.request
+import urllib.error
+from typing import Optional
 
-log = logging.getLogger(__name__)
-
-
-class _Result(QObject):
-    """Carries HTTP response back to UI thread via signal."""
-    finished = pyqtSignal(dict)
-
-
-class _Worker(QRunnable):
-    """Executes HTTP request in thread pool."""
-
-    def __init__(self, method: str, url: str,
-                 body: dict, result: _Result):
-        super().__init__()
-        self._method = method
-        self._url    = url
-        self._body   = body
-        self._result = result
-
-    def run(self):
-        try:
-            if self._method == "POST":
-                resp = httpx.post(
-                    self._url, json=self._body, timeout=5.0)
-            else:
-                resp = httpx.get(self._url, timeout=5.0)
-            data = resp.json()
-        except httpx.TimeoutException:
-            data = {"ok": False, "error": "Request timeout"}
-        except httpx.ConnectError:
-            data = {"ok": False, "error": "Cannot reach server"}
-        except Exception as e:
-            data = {"ok": False, "error": str(e)}
-
-        self._result.finished.emit(data)
+log = logging.getLogger("rest_client")
 
 
 class RestClient:
-    """
-    Non-blocking REST client for MORBION SCADA server.
-    All methods return immediately.
-    callback(result_dict) called on completion from UI thread.
 
-    GC FIX: _active_requests holds strong references to Result objects
-    until callbacks fire. Without this, Qt GC destroys the QObject
-    before the signal is emitted, causing silent callback failures.
-    """
+    def __init__(self, base_url: str, timeout: float = 5.0):
+        self._base    = base_url.rstrip("/")
+        self._timeout = timeout
 
-    def __init__(self, host: str, port: int):
-        self._base         = f"http://{host}:{port}"
-        self._pool         = QThreadPool.globalInstance()
-        self._active_requests: set = set()
+    def _get(self, path: str) -> Optional[dict]:
+        url = f"{self._base}{path}"
+        try:
+            with urllib.request.urlopen(url, timeout=self._timeout) as r:
+                return json.loads(r.read().decode())
+        except Exception as e:
+            log.warning("GET %s failed: %s", path, e)
+            return None
 
-    def _send(self, method: str, url: str,
-              body: dict, callback):
-        """Internal — create worker, hold reference, fire."""
-        result = _Result()
+    def _post(self, path: str, body: dict) -> Optional[dict]:
+        url     = f"{self._base}{path}"
+        payload = json.dumps(body).encode()
+        req     = urllib.request.Request(
+            url,
+            data    = payload,
+            method  = "POST",
+            headers = {"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self._timeout) as r:
+                return json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            try:
+                return json.loads(e.read().decode())
+            except Exception:
+                return {"ok": False, "error": str(e)}
+        except Exception as e:
+            log.warning("POST %s failed: %s", path, e)
+            return None
 
-        # Hold strong reference until callback fires
-        self._active_requests.add(result)
+    # ── Data ──────────────────────────────────────────────────────────────────
 
-        def on_done(data: dict):
-            self._active_requests.discard(result)
-            if callback:
-                callback(data)
+    def get_health(self) -> Optional[dict]:
+        return self._get("/health")
 
-        result.finished.connect(on_done)
-        worker = _Worker(method, url, body, result)
-        self._pool.start(worker)
+    def get_all(self) -> Optional[dict]:
+        return self._get("/data")
+
+    def get_process(self, process: str) -> Optional[dict]:
+        return self._get(f"/data/{process}")
+
+    def get_alarms(self) -> Optional[list]:
+        result = self._get("/data/alarms")
+        return result if isinstance(result, list) else []
+
+    def get_alarm_history(self) -> Optional[list]:
+        result = self._get("/alarms/history")
+        return result if isinstance(result, list) else []
 
     # ── Control ───────────────────────────────────────────────────────────────
 
-    def write_register(self, process: str, register: int,
-                       value: int, callback):
-        """
-        POST /control — write a Modbus register.
-        callback(result_dict) on completion.
-        result_dict keys: ok, process, register, value, confirmed, error
-        """
-        self._send(
-            method   = "POST",
-            url      = f"{self._base}/control",
-            body     = {
-                "process":  process,
-                "register": register,
-                "value":    value,
-            },
-            callback = callback,
-        )
+    def write_register(self, process: str, register: int, value: int) -> dict:
+        result = self._post("/control", {
+            "process":  process,
+            "register": register,
+            "value":    value,
+        })
+        return result or {"ok": False, "error": "No response"}
 
-    # ── Alarm acknowledgment ──────────────────────────────────────────────────
+    # ── Verify after write ────────────────────────────────────────────────────
 
-    def ack_alarm(self, alarm_id: str, callback,
-                  operator: str = "OPERATOR"):
-        """
-        POST /alarms/ack — acknowledge one alarm or all.
-        alarm_id: specific ID like "PS-001" or "all"
-        """
-        self._send(
-            method   = "POST",
-            url      = f"{self._base}/alarms/ack",
-            body     = {
-                "alarm_id": alarm_id,
-                "operator": operator,
+    def read_register_value(self, process: str, register: int) -> Optional[int]:
+        """Read a single register's raw value from current process snapshot."""
+        data = self.get_process(process)
+        if not data:
+            return None
+        # Map register index to field name for readback verification
+        reg_field_map = {
+            "pumping_station": {
+                0: ("tank_level_pct",        10.0),
+                2: ("pump_speed_rpm",          1.0),
+                7: ("pump_running",            1.0),
+                8: ("inlet_valve_pos_pct",    10.0),
+                9: ("outlet_valve_pos_pct",   10.0),
+                14:("fault_code",              1.0),
             },
-            callback = callback,
-        )
+            "heat_exchanger": {
+                12:("hot_pump_speed_rpm",      1.0),
+                13:("cold_pump_speed_rpm",     1.0),
+                14:("hot_valve_pos_pct",      10.0),
+                15:("cold_valve_pos_pct",     10.0),
+                16:("fault_code",              1.0),
+            },
+            "boiler": {
+                6: ("burner_state",            1.0),
+                7: ("fw_pump_speed_rpm",       1.0),
+                8: ("steam_valve_pos_pct",    10.0),
+                9: ("fw_valve_pos_pct",       10.0),
+                10:("blowdown_valve_pos_pct", 10.0),
+                14:("fault_code",              1.0),
+            },
+            "pipeline": {
+                3: ("duty_pump_speed_rpm",     1.0),
+                5: ("duty_pump_running",       1.0),
+                7: ("standby_pump_running",    1.0),
+                8: ("inlet_valve_pos_pct",    10.0),
+                9: ("outlet_valve_pos_pct",   10.0),
+                14:("fault_code",              1.0),
+            },
+        }
+        mapping = reg_field_map.get(process, {})
+        if register not in mapping:
+            return None
+        field, scale = mapping[register]
+        val = data.get(field)
+        if val is None:
+            return None
+        if isinstance(val, bool):
+            return 1 if val else 0
+        return int(round(float(val) * scale))
+
+    # ── Alarm acknowledge ─────────────────────────────────────────────────────
+
+    def ack_alarm(self, alarm_id: str, operator: str = "OPERATOR") -> dict:
+        result = self._post("/alarms/ack", {
+            "alarm_id": alarm_id,
+            "operator": operator,
+        })
+        return result or {"ok": False, "error": "No response"}
 
     # ── PLC API ───────────────────────────────────────────────────────────────
 
-    def plc_reload(self, process: str, callback):
-        """POST /plc/<process>/program/reload — hot reload ST program."""
-        self._send(
-            method   = "POST",
-            url      = f"{self._base}/plc/{process}/program/reload",
-            body     = {},
-            callback = callback,
-        )
+    def plc_get_program(self, process: str) -> Optional[dict]:
+        return self._get(f"/plc/{process}/program")
 
-    def plc_upload(self, process: str,
-                   source: str, callback):
-        """POST /plc/<process>/program — upload new ST source."""
-        self._send(
-            method   = "POST",
-            url      = f"{self._base}/plc/{process}/program",
-            body     = {"source": source},
-            callback = callback,
-        )
+    def plc_upload_program(self, process: str, source: str) -> dict:
+        result = self._post(f"/plc/{process}/program", {"source": source})
+        return result or {"ok": False, "error": "No response"}
 
-    def plc_get_status(self, process: str, callback):
-        """GET /plc/<process>/status — get PLC runtime status."""
-        self._send(
-            method   = "GET",
-            url      = f"{self._base}/plc/{process}/status",
-            body     = {},
-            callback = callback,
-        )
+    def plc_reload(self, process: str) -> dict:
+        result = self._post(f"/plc/{process}/program/reload", {})
+        return result or {"ok": False, "error": "No response"}
 
-    def plc_get_program(self, process: str, callback):
-        """GET /plc/<process>/program — get ST source."""
-        self._send(
-            method   = "GET",
-            url      = f"{self._base}/plc/{process}/program",
-            body     = {},
-            callback = callback,
-        )
+    def plc_get_status(self, process: str) -> Optional[dict]:
+        return self._get(f"/plc/{process}/status")
 
-    def plc_get_variables(self, process: str, callback):
-        """GET /plc/<process>/variables — get variable map."""
-        self._send(
-            method   = "GET",
-            url      = f"{self._base}/plc/{process}/variables",
-            body     = {},
-            callback = callback,
-        )
-
-    # ── Data reads ────────────────────────────────────────────────────────────
-
-    def get_alarm_history(self, callback):
-        """GET /alarms/history — recent alarm history."""
-        self._send(
-            method   = "GET",
-            url      = f"{self._base}/alarms/history",
-            body     = {},
-            callback = callback,
-        )
+    def plc_get_variables(self, process: str) -> Optional[dict]:
+        return self._get(f"/plc/{process}/variables")
