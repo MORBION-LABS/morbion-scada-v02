@@ -4,259 +4,240 @@ All colors, fonts, dimensions in one place.
 Change here — changes everywhere.
 """
 
-STYLESHEET = """
-/* ── Base ── */
-QWidget {
-    background-color: #020c16;
-    color: #8ab8c8;
-    font-family: 'Courier New', 'Consolas', monospace;
-    font-size: 11px;
-}
-
-QMainWindow {
-    background-color: #020c16;
-}
-
-/* ── Tab Bar ── */
-QTabWidget::pane {
-    border: 1px solid #0d2030;
-    background-color: #020c16;
-}
-
-QTabBar::tab {
-    background-color: #030f1a;
-    color: #2a5a6a;
-    border: 1px solid #0a1e2a;
-    border-bottom: none;
-    padding: 8px 20px;
-    font-size: 10px;
-    letter-spacing: 2px;
-    font-weight: bold;
-    min-width: 100px;
-}
-
-QTabBar::tab:selected {
-    background-color: #051525;
-    color: #00d4ff;
-    border-color: #00d4ff;
-    border-bottom: 2px solid #00d4ff;
-}
-
-QTabBar::tab:hover:!selected {
-    background-color: #040e18;
-    color: #5aaacc;
-}
-
-/* ── Cards / GroupBox ── */
-QGroupBox {
-    background-color: #040e18;
-    border: 1px solid #0d2030;
-    border-radius: 2px;
-    margin-top: 14px;
-    padding: 10px 8px 8px 8px;
-    font-size: 9px;
-    letter-spacing: 2px;
-    color: #2a5a6a;
-    font-weight: bold;
-}
-
-QGroupBox::title {
-    subcontrol-origin: margin;
-    subcontrol-position: top left;
-    padding: 0 6px;
-    color: #2a5a6a;
-    letter-spacing: 2px;
-    font-size: 9px;
-}
-
-/* ── Labels ── */
-QLabel {
-    background: transparent;
-    color: #8ab8c8;
-}
-
-/* ── Buttons ── */
-QPushButton {
-    background-color: #030f1a;
-    border: 1px solid #0d2030;
-    color: #5aaacc;
-    padding: 5px 14px;
-    font-family: 'Courier New', monospace;
-    font-size: 10px;
-    letter-spacing: 1px;
-    border-radius: 1px;
-    min-height: 24px;
-}
-
-QPushButton:hover {
-    background-color: #051e30;
-    border-color: #00d4ff;
-    color: #00d4ff;
-}
-
-QPushButton:pressed {
-    background-color: #002030;
-    border-color: #00aacc;
-}
-
-QPushButton:disabled {
-    color: #1a3a4a;
-    border-color: #071520;
-}
-
-/* Danger buttons */
-QPushButton[danger="true"] {
-    border-color: #3a1010;
-    color: #cc4433;
-}
-QPushButton[danger="true"]:hover {
-    border-color: #ff3333;
-    color: #ff3333;
-    background-color: #1a0000;
-}
-
-/* OK/clear buttons */
-QPushButton[action="clear"] {
-    border-color: #103a10;
-    color: #33cc44;
-}
-QPushButton[action="clear"]:hover {
-    border-color: #00ff44;
-    color: #00ff44;
-    background-color: #001a00;
-}
-
-/* ── Inputs ── */
-QLineEdit, QSpinBox {
-    background-color: #020a12;
-    border: 1px solid #0d2030;
-    color: #00d4ff;
-    padding: 3px 6px;
-    font-family: 'Courier New', monospace;
-    font-size: 11px;
-    border-radius: 1px;
-}
-
-QLineEdit:focus, QSpinBox:focus {
-    border-color: #00d4ff;
-}
-
-QSpinBox::up-button, QSpinBox::down-button {
-    background-color: #030f1a;
-    border: 1px solid #0d2030;
-    width: 14px;
-}
-
-/* ── ComboBox ── */
-QComboBox {
-    background-color: #020a12;
-    border: 1px solid #0d2030;
-    color: #00d4ff;
-    padding: 3px 6px;
-    font-family: 'Courier New', monospace;
-    font-size: 10px;
-    min-height: 22px;
-}
-
-QComboBox QAbstractItemView {
-    background-color: #030f1a;
-    border: 1px solid #0d2030;
-    color: #00d4ff;
-    selection-background-color: #051e30;
-}
-
-/* ── ScrollBar ── */
-QScrollBar:vertical {
-    background: #020a12;
-    width: 6px;
-    border: none;
-}
-QScrollBar::handle:vertical {
-    background: #0d2030;
-    border-radius: 3px;
-    min-height: 20px;
-}
-QScrollBar::handle:vertical:hover {
-    background: #00d4ff;
-}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-
-QScrollBar:horizontal {
-    background: #020a12;
-    height: 6px;
-    border: none;
-}
-QScrollBar::handle:horizontal {
-    background: #0d2030;
-    border-radius: 3px;
-}
-QScrollBar::handle:horizontal:hover { background: #00d4ff; }
-QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
-
-/* ── Table ── */
-QTableWidget {
-    background-color: #020a12;
-    border: 1px solid #0d2030;
-    gridline-color: #071520;
-    color: #8ab8c8;
-    selection-background-color: #051e30;
-    selection-color: #00d4ff;
-}
-
-QTableWidget::item { padding: 4px 8px; border: none; }
-QTableWidget::item:selected { background-color: #051e30; color: #00d4ff; }
-
-QHeaderView::section {
-    background-color: #030f1a;
-    border: none;
-    border-right: 1px solid #0d2030;
-    border-bottom: 1px solid #0d2030;
-    padding: 5px 8px;
-    color: #2a5a6a;
-    font-size: 9px;
-    letter-spacing: 2px;
-    font-weight: bold;
-}
-
-/* ── Splitter ── */
-QSplitter::handle { background: #0d2030; }
-QSplitter::handle:horizontal { width: 1px; }
-QSplitter::handle:vertical { height: 1px; }
-
-/* ── Status bar ── */
-QStatusBar {
-    background-color: #030f1a;
-    border-top: 1px solid #0d2030;
-    color: #2a5a6a;
-    font-size: 10px;
-    letter-spacing: 1px;
-}
+"""
+theme.py — MORBION SCADA Desktop Client Theme
+MORBION SCADA v02
 """
 
-# ── Color tokens for use in  code ──────────────────────────────────────
+# ── Colours ───────────────────────────────────────────────────────────────────
+BG          = "#0a0a0a"
+SURFACE     = "#111111"
+BORDER      = "#1a1a1a"
+ACCENT      = "#00d4ff"
+TEXT        = "#e0e0e0"
+TEXT_DIM    = "#666666"
+GREEN       = "#00ff88"
+RED         = "#ff3333"
+AMBER       = "#ffaa00"
+WHITE       = "#ffffff"
 
-C_BG       = "#020c16"
-C_SURFACE  = "#040e18"
-C_BORDER   = "#0d2030"
-C_ACCENT   = "#00d4ff"
-C_GREEN    = "#00ff88"
-C_YELLOW   = "#ffcc00"
-C_RED      = "#ff3333"
-C_ORANGE   = "#ff8800"
-C_MUTED    = "#2a5a6a"
-C_TEXT     = "#8ab8c8"
-C_TEXT2    = "#4a7a8a"
+# ── QSS colour strings (for stylesheet use) ───────────────────────────────────
+QSS = f"""
+QWidget {{
+    background-color: {BG};
+    color: {TEXT};
+    font-family: "Courier New", "Consolas", monospace;
+    font-size: 12px;
+}}
 
-SEV_COLORS = {
-    "CRIT": C_RED,
-    "HIGH": C_ORANGE,
-    "MED":  C_YELLOW,
-    "LOW":  C_TEXT2,
-}
+QMainWindow {{
+    background-color: {BG};
+}}
 
-def status_color(fault_code: int, online: bool) -> str:
-    if not online:
-        return C_MUTED
-    if fault_code != 0:
-        return C_RED
-    return C_GREEN
+QTabWidget::pane {{
+    border: 1px solid {BORDER};
+    background-color: {SURFACE};
+}}
+
+QTabBar::tab {{
+    background-color: {SURFACE};
+    color: {TEXT_DIM};
+    padding: 8px 18px;
+    border: 1px solid {BORDER};
+    border-bottom: none;
+    font-family: "Courier New", monospace;
+    font-size: 11px;
+    letter-spacing: 1px;
+}}
+
+QTabBar::tab:selected {{
+    background-color: {BG};
+    color: {ACCENT};
+    border-bottom: 2px solid {ACCENT};
+}}
+
+QTabBar::tab:hover {{
+    color: {TEXT};
+}}
+
+QScrollBar:vertical {{
+    background: {SURFACE};
+    width: 8px;
+    border: none;
+}}
+
+QScrollBar::handle:vertical {{
+    background: {BORDER};
+    border-radius: 4px;
+    min-height: 20px;
+}}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+    height: 0px;
+}}
+
+QScrollBar:horizontal {{
+    background: {SURFACE};
+    height: 8px;
+    border: none;
+}}
+
+QScrollBar::handle:horizontal {{
+    background: {BORDER};
+    border-radius: 4px;
+}}
+
+QSplitter::handle {{
+    background: {BORDER};
+    height: 3px;
+}}
+
+QSplitter::handle:hover {{
+    background: {ACCENT};
+}}
+
+QLineEdit {{
+    background-color: {SURFACE};
+    color: {TEXT};
+    border: 1px solid {BORDER};
+    padding: 4px 8px;
+    font-family: "Courier New", monospace;
+}}
+
+QLineEdit:focus {{
+    border: 1px solid {ACCENT};
+}}
+
+QPushButton {{
+    background-color: {SURFACE};
+    color: {TEXT};
+    border: 1px solid {BORDER};
+    padding: 5px 14px;
+    font-family: "Courier New", monospace;
+    font-size: 11px;
+    letter-spacing: 1px;
+}}
+
+QPushButton:hover {{
+    border: 1px solid {ACCENT};
+    color: {ACCENT};
+}}
+
+QPushButton:pressed {{
+    background-color: {BORDER};
+}}
+
+QPushButton:disabled {{
+    color: {TEXT_DIM};
+    border-color: {BORDER};
+}}
+
+QLabel {{
+    background: transparent;
+}}
+
+QGroupBox {{
+    border: 1px solid {BORDER};
+    margin-top: 8px;
+    padding-top: 8px;
+    font-family: "Courier New", monospace;
+    font-size: 11px;
+    color: {TEXT_DIM};
+    letter-spacing: 1px;
+}}
+
+QGroupBox::title {{
+    subcontrol-origin: margin;
+    left: 8px;
+    padding: 0 4px;
+    color: {ACCENT};
+}}
+
+QTextEdit {{
+    background-color: {SURFACE};
+    color: {TEXT};
+    border: 1px solid {BORDER};
+    font-family: "Courier New", monospace;
+    font-size: 12px;
+}}
+
+QTextEdit:focus {{
+    border: 1px solid {ACCENT};
+}}
+
+QTableWidget {{
+    background-color: {SURFACE};
+    color: {TEXT};
+    border: 1px solid {BORDER};
+    gridline-color: {BORDER};
+    font-family: "Courier New", monospace;
+    font-size: 11px;
+    selection-background-color: {BORDER};
+}}
+
+QTableWidget::item {{
+    padding: 4px 8px;
+    border: none;
+}}
+
+QHeaderView::section {{
+    background-color: {BG};
+    color: {TEXT_DIM};
+    border: 1px solid {BORDER};
+    padding: 4px 8px;
+    font-family: "Courier New", monospace;
+    font-size: 10px;
+    letter-spacing: 1px;
+}}
+
+QComboBox {{
+    background-color: {SURFACE};
+    color: {TEXT};
+    border: 1px solid {BORDER};
+    padding: 4px 8px;
+    font-family: "Courier New", monospace;
+}}
+
+QComboBox:focus {{
+    border: 1px solid {ACCENT};
+}}
+
+QComboBox QAbstractItemView {{
+    background-color: {SURFACE};
+    color: {TEXT};
+    border: 1px solid {BORDER};
+    selection-background-color: {BORDER};
+}}
+"""
+
+# ── Label styles (inline stylesheet strings) ──────────────────────────────────
+def label_style(color: str, size: int = 12, bold: bool = False) -> str:
+    weight = "bold" if bold else "normal"
+    return (f"color: {color}; font-family: 'Courier New', monospace; "
+            f"font-size: {size}px; font-weight: {weight}; background: transparent;")
+
+STYLE_ACCENT  = label_style(ACCENT,   12)
+STYLE_DIM     = label_style(TEXT_DIM, 11)
+STYLE_GREEN   = label_style(GREEN,    12)
+STYLE_RED     = label_style(RED,      12)
+STYLE_AMBER   = label_style(AMBER,    12)
+STYLE_TEXT    = label_style(TEXT,     12)
+STYLE_HEADER  = label_style(ACCENT,   14, bold=True)
+
+# ── Logo SVG — hexagon with M ─────────────────────────────────────────────────
+LOGO_SVG = """<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <polygon points="50,5 93,27.5 93,72.5 50,95 7,72.5 7,27.5"
+           fill="none" stroke="#00d4ff" stroke-width="3"/>
+  <text x="50" y="62" text-anchor="middle"
+        font-family="Courier New, monospace" font-size="36"
+        font-weight="bold" fill="#00d4ff">M</text>
+</svg>"""
+
+# ── Watermark SVG — faint hexagon for content area background ─────────────────
+WATERMARK_SVG = """<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <polygon points="100,10 186,55 186,145 100,190 14,145 14,55"
+           fill="none" stroke="#00d4ff" stroke-width="2" opacity="0.08"/>
+  <text x="100" y="118" text-anchor="middle"
+        font-family="Courier New, monospace" font-size="72"
+        font-weight="bold" fill="#00d4ff" opacity="0.05">M</text>
+</svg>"""
