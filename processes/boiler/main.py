@@ -188,9 +188,14 @@ def main():
     if not plc.status["loaded"]:
         log.error("PLC program failed to load: %s", plc.status["last_error"])
 
-    # ── Modbus Server ─────────────────────────────────────────────
+   # ── Modbus Server ─────────────────────────────────────────────
     modbus = ModbusServer(config, write_callback=on_modbus_write)
     modbus.start()
+
+    # ── PLC HTTP API ──────────────────────────────────────────────
+    from shared.plc_http import PLCHttpServer
+    plc_http = PLCHttpServer(plc, port=5070)
+    plc_http.start()
 
     # ── Start ─────────────────────────────────────────────────────
     with state:
@@ -258,6 +263,7 @@ def main():
     burner.command(0)
     fw_pump.stop()
     modbus.stop()
+    plc_http.stop()
     state.save(STATE_PATH)
     log.info("Boiler steam generation stopped cleanly")
     sys.exit(0)
