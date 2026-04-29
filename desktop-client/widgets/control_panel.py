@@ -1,118 +1,156 @@
 """
-MORBION — ControlPanel
-Per-process control widget.
-Named fault injection buttons + direct register write.
-Calls rest_client.write_register() — non-blocking.
+control_panel.py — Operator control panel (right side of process views)
+MORBION SCADA v02
+
+Provides write controls for a single process.
+Verify-after-write via rest_client.
 """
 
+import time
+import threading
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QSpinBox, QGroupBox, QGridLayout
+    QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QPushButton, QLineEdit,
+    QGroupBox, QComboBox,
 )
-from PyQt6.QtCore import Qt
-from theme import C_ACCENT, C_TEXT2, C_RED, C_GREEN
+from PyQt6.QtCore import Qt, QTimer
+import theme
 
 
-class ControlPanel(QWidget):
-    """
-    Builds a control panel from a process spec dict:
-    {
-        "process":  "boiler",
-        "label":    "BOILER — EABL/Bidco",
-        "faults": [
-            {"name": "Inject LOW_WATER",  "register": 2,  "value": 150, "danger": True},
-            {"name": "Clear Fault Code",  "register": 14, "value": 0,   "danger": False},
-        ],
-        "writes": [
-            {"label": "Drum Level (raw×10)", "register": 2,  "min": 0, "max": 1000, "default": 500},
-            {"label": "Burner State (0/1/2)","register": 6,  "min": 0, "max": 2,    "default": 1},
-        ]
-    }
-    """
+class ControlButton(QPushButton):
 
-    def __init__(self, spec: dict, rest_client, parent=None):
-        super().__init__(parent)
-        self._rest    = rest_client
-        self._process = spec["process"]
-        self._fb_label = None
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-
-        # ── Feedback bar ──────────────────────────────────────────────────────
-        self._fb = QLabel("")
-        self._fb.setStyleSheet(
-            f"color:{C_ACCENT};font-size:10px;padding:3px 8px;"
-            f"background:#020a12;border:1px solid #0d2030;"
+    def __init__(self, text: str, color: str = None):
+        super().__init__(text)
+        c = color or theme.ACCENT
+        self.setStyleSheet(
+            f"QPushButton {{ background: {theme.SURFACE}; color: {c}; "
+            f"border: 1px solid {c}; padding: 6px 12px; "
+            f"font-family: 'Courier New', monospace; letter-spacing: 1px; }}"
+            f"QPushButton:hover {{ background: {c}; color: {theme.BG}; }}"
+            f"QPushButton:pressed {{ background: {theme.BORDER}; }}"
+            f"QPushButton:disabled {{ color: {theme.TEXT_DIM}; "
+            f"border-color: {theme.BORDER}; }}"
         )
-        self._fb.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._fb.hide()
+
+
+class RegisterWriteRow(QWidget):
+    """Label + input + write button + feedback for a single register."""
+
+    def __init__(self, label: str, rest, process: str,
+                 register: int, scale: float = 1.0,
+                 hint: str = ""):
+        super().__init__()
+        self._rest     = rest
+        self._process  = process
+        self._register = register
+        self._scale    = scale
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 2, 0, 2)
+        layout.setSpacing(6)
+
+        lbl = QLabel(label)
+        lbl.setFixedWidth(150)
+        lbl.setStyleSheet(theme.STYLE_DIM)
+        layout.addWidget(lbl)
+
+        self._input = QLineEdit()
+        self._input.setPlaceholderText(hint)
+        self._input.setFixedWidth(80)
+        self._input.setStyleSheet(
+            f"background: {theme.SURFACE}; color: {theme.TEXT}; "
+            f"border: 1px solid {theme.BORDER}; padding: 3px 6px; "
+            f"font-family: 'Courier New', monospace;"
+        )
+        layout.addWidget(self._input)
+
+        btn = ControlButton("WRITE")
+        btn.setFixedWidth(70)
+        btn.clicked.connect(self._on_write)
+        layout.addWidget(btn)
+
+        self._fb = QLabel("")
+        self._fb.setStyleSheet(theme.STYLE_DIM)
         layout.addWidget(self._fb)
-
-        # ── Fault injection ───────────────────────────────────────────────────
-        if spec.get("faults"):
-            fg = QGroupBox("FAULT INJECTION")
-            fg_layout = QVBoxLayout(fg)
-            fg_layout.setSpacing(4)
-            for f in spec["faults"]:
-                btn = QPushButton(f["name"])
-                if f.get("danger", False):
-                    btn.setProperty("danger", "true")
-                    btn.style().unpolish(btn)
-                    btn.style().polish(btn)
-                else:
-                    btn.setProperty("action", "clear")
-                    btn.style().unpolish(btn)
-                    btn.style().polish(btn)
-                reg = f["register"]
-                val = f["value"]
-                btn.clicked.connect(
-                    lambda checked, r=reg, v=val: self._send(r, v))
-                fg_layout.addWidget(btn)
-            layout.addWidget(fg)
-
-        # ── Direct register write ─────────────────────────────────────────────
-        if spec.get("writes"):
-            wg = QGroupBox("DIRECT REGISTER WRITE")
-            wg_layout = QGridLayout(wg)
-            wg_layout.setSpacing(4)
-            for i, w in enumerate(spec["writes"]):
-                lbl = QLabel(w["label"])
-                lbl.setStyleSheet(f"color:{C_TEXT2};font-size:9px;")
-                spin = QSpinBox()
-                spin.setRange(w.get("min", 0), w.get("max", 65535))
-                spin.setValue(w.get("default", 0))
-                spin.setMinimumWidth(80)
-                btn = QPushButton("WRITE")
-                btn.setFixedWidth(60)
-                reg = w["register"]
-                btn.clicked.connect(
-                    lambda checked, s=spin, r=reg: self._send(r, s.value()))
-                wg_layout.addWidget(lbl,  i, 0)
-                wg_layout.addWidget(spin, i, 1)
-                wg_layout.addWidget(btn,  i, 2)
-            layout.addWidget(wg)
-
         layout.addStretch()
 
-    def _send(self, register: int, value: int):
-        self._show_fb(f"Sending reg={register} val={value}...", C_TEXT2)
-        self._rest.write_register(
-            self._process, register, value, self._on_result)
+    def _on_write(self):
+        txt = self._input.text().strip()
+        if not txt:
+            return
+        try:
+            raw = int(round(float(txt) * self._scale))
+            raw = max(0, min(65535, raw))
+        except ValueError:
+            self._feedback("INVALID", theme.RED)
+            return
 
-    def _on_result(self, result: dict):
-        if result.get("ok") and result.get("confirmed"):
-            self._show_fb(f"✓ reg={result.get('register')} val={result.get('value')} — confirmed", C_GREEN)
-        elif result.get("ok"):
-            self._show_fb(f"⚠ Written but not confirmed", "#ffcc00")
+        threading.Thread(
+            target=self._do_write,
+            args=(raw,),
+            daemon=True,
+        ).start()
+
+    def _do_write(self, raw: int):
+        result = self._rest.write_register(self._process, self._register, raw)
+        if not result.get("ok"):
+            QTimer.singleShot(0, lambda: self._feedback(
+                f"ERR: {result.get('error','')[:20]}", theme.RED))
+            return
+
+        time.sleep(0.35)
+        readback = self._rest.read_register_value(self._process, self._register)
+
+        if readback is None:
+            QTimer.singleShot(0, lambda: self._feedback("UNVERIFIED", theme.AMBER))
+        elif readback == raw:
+            QTimer.singleShot(0, lambda: self._feedback("CONFIRMED", theme.GREEN))
         else:
-            self._show_fb(f"✗ {result.get('error', 'Failed')}", C_RED)
+            QTimer.singleShot(0, lambda: self._feedback("OVERRIDDEN", theme.AMBER))
 
-    def _show_fb(self, msg: str, color: str):
-        self._fb.setText(msg)
+    def _feedback(self, text: str, color: str):
+        self._fb.setText(text)
         self._fb.setStyleSheet(
-            f"color:{color};font-size:10px;padding:3px 8px;"
-            f"background:#020a12;border:1px solid #0d2030;"
+            f"color: {color}; font-family: 'Courier New', monospace; "
+            f"font-size: 11px; background: transparent;"
         )
-        self._fb.show()
+        QTimer.singleShot(4000, lambda: self._fb.setText(""))
+
+
+class FaultClearButton(QWidget):
+    """Operator reset — writes 0 to register 14."""
+
+    def __init__(self, rest, process: str):
+        super().__init__()
+        self._rest    = rest
+        self._process = process
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 4, 0, 4)
+
+        btn = ControlButton("CLEAR FAULT / OPERATOR RESET", theme.AMBER)
+        btn.clicked.connect(self._on_clear)
+        layout.addWidget(btn)
+
+        self._fb = QLabel("")
+        self._fb.setStyleSheet(theme.STYLE_DIM)
+        layout.addWidget(self._fb)
+        layout.addStretch()
+
+    def _on_clear(self):
+        threading.Thread(target=self._do_clear, daemon=True).start()
+
+    def _do_clear(self):
+        result = self._rest.write_register(self._process, 14, 0)
+        if result.get("ok"):
+            QTimer.singleShot(0, lambda: self._show_fb("RESET SENT", theme.GREEN))
+        else:
+            QTimer.singleShot(0, lambda: self._show_fb("FAILED", theme.RED))
+
+    def _show_fb(self, text: str, color: str):
+        self._fb.setText(text)
+        self._fb.setStyleSheet(
+            f"color: {color}; font-family: 'Courier New', monospace; "
+            f"font-size: 11px; background: transparent;"
+        )
+        QTimer.singleShot(3000, lambda: self._fb.setText(""))
