@@ -8,180 +8,124 @@ Organized by process. Updates every WebSocket push.
 No pyqtgraph dependency — uses existing SparklineWidget.
 """
 
+"""
+trends_view.py — Multi-process trend sparklines
+MORBION SCADA v02
+"""
+
 from PyQt6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QGroupBox,
-    QScrollArea, QWidget, QLabel
+    QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QScrollArea, QGroupBox,
 )
-from PyQt6.QtCore import Qt
-
-from views.base_view          import BaseView
+import theme
 from widgets.sparkline_widget import SparklineWidget
-from widgets.value_label      import ValueLabel
-from theme import C_TEXT2, C_ACCENT, C_MUTED
 
 
-# ── Trend definitions per process ─────────────────────────────────────────────
-# (display_label, data_key, unit, color, warn, crit)
+class TrendsView(QWidget):
 
-_PUMP_TRENDS = [
-    ("Tank Level",          "tank_level_pct",       "%",     "#00d4ff", 80,   90),
-    ("Pump Flow",           "pump_flow_m3hr",        "m³/hr", "#00ff88", None, None),
-    ("Discharge Pressure",  "discharge_pressure_bar","bar",   "#ffcc00", 7,    8),
-    ("Pump Current",        "pump_current_A",        "A",     "#ff8800", 12,   15),
-]
+    def __init__(self):
+        super().__init__()
+        self._build_ui()
 
-_HX_TRENDS = [
-    ("T Hot In",            "T_hot_in_C",            "°C",    "#ff3333", 175, 185),
-    ("T Hot Out",           "T_hot_out_C",           "°C",    "#ff8800", 155, 165),
-    ("T Cold In",           "T_cold_in_C",           "°C",    "#00d4ff", None, None),
-    ("T Cold Out",          "T_cold_out_C",           "°C",   "#00ff88", 85,   95),
-    ("Efficiency",          "efficiency_pct",         "%",    "#ffcc00", None, None),
-    ("Q Duty",              "Q_duty_kW",              "kW",   "#aa44ff", None, None),
-]
-
-_BOILER_TRENDS = [
-    ("Drum Pressure",       "drum_pressure_bar",     "bar",   "#ff8800", 9,   10),
-    ("Drum Level",          "drum_level_pct",        "%",     "#00d4ff", None, None),
-    ("Steam Flow",          "steam_flow_kghr",       "kg/hr", "#00ff88", None, None),
-    ("Flue Gas Temp",       "flue_gas_temp_C",       "°C",    "#ff3333", None, None),
-    ("Q Burner",            "Q_burner_kW",           "kW",    "#ffcc00", None, None),
-]
-
-_PIPELINE_TRENDS = [
-    ("Outlet Pressure",     "outlet_pressure_bar",   "bar",   "#ff8800", 50,   55),
-    ("Inlet Pressure",      "inlet_pressure_bar",    "bar",   "#00d4ff", None, None),
-    ("Flow Rate",           "flow_rate_m3hr",        "m³/hr", "#00ff88", None, None),
-    ("Flow Velocity",       "flow_velocity_ms",      "m/s",   "#ffcc00", None, None),
-    ("Pump Differential",   "pump_differential_bar", "bar",   "#aa44ff", None, None),
-]
-
-
-class _TrendRow(QWidget):
-    """One trend row: label + current value + sparkline."""
-
-    def __init__(self, label: str, unit: str,
-                 color: str, parent=None):
-        super().__init__(parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(8)
-
-        lbl = QLabel(label.upper())
-        lbl.setStyleSheet(
-            f"color:{C_TEXT2};font-size:9px;"
-            f"letter-spacing:1px;")
-        lbl.setFixedWidth(150)
-        layout.addWidget(lbl)
-
-        self._val = QLabel("—")
-        self._val.setStyleSheet(
-            f"color:{C_ACCENT};font-size:11px;"
-            f"font-weight:bold;")
-        self._val.setFixedWidth(70)
-        self._val.setAlignment(
-            Qt.AlignmentFlag.AlignRight |
-            Qt.AlignmentFlag.AlignVCenter)
-        layout.addWidget(self._val)
-
-        u = QLabel(unit)
-        u.setStyleSheet(
-            f"color:{C_MUTED};font-size:9px;")
-        u.setFixedWidth(40)
-        layout.addWidget(u)
-
-        self._spark = SparklineWidget(
-            max_points=120, color=color)
-        layout.addWidget(self._spark, 1)
-
-    def push(self, value):
-        if value is None:
-            return
-        self._val.setText(f"{float(value):.1f}")
-        self._spark.push(float(value))
-
-
-class _ProcessTrendGroup(QGroupBox):
-    """Trend group for one process."""
-
-    def __init__(self, title: str,
-                 trend_defs: list, parent=None):
-        super().__init__(title)
-        layout = QVBoxLayout(self)
-        layout.setSpacing(2)
-        layout.setContentsMargins(8, 12, 8, 8)
-
-        self._rows = {}
-        for label, key, unit, color, warn, crit in trend_defs:
-            row = _TrendRow(label, unit, color)
-            self._rows[key] = row
-            layout.addWidget(row)
-
-    def update_data(self, data: dict):
-        if not data.get("online"):
-            return
-        for key, row in self._rows.items():
-            val = data.get(key)
-            if val is not None:
-                row.push(val)
-
-
-class TrendsView(BaseView):
-
-    def __init__(self, rest_client, parent=None):
-        super().__init__(rest_client, parent)
-
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-
-        # Scroll area — all trends may exceed window height
+    def _build_ui(self):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("border: none;")
 
-        content = QWidget()
-        content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(8, 8, 8, 8)
-        content_layout.setSpacing(8)
+        container = QWidget()
+        root = QVBoxLayout(container)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(12)
 
-        # Header
-        header = QLabel(
-            "REAL-TIME TRENDS  ·  120 second rolling window  ·  "
-            "1 second resolution")
-        header.setStyleSheet(
-            f"color:{C_MUTED};font-size:9px;letter-spacing:1px;")
-        content_layout.addWidget(header)
+        title = QLabel("PROCESS TRENDS")
+        title.setStyleSheet(theme.STYLE_HEADER)
+        root.addWidget(title)
 
-        # Process groups
-        self._pump_group = _ProcessTrendGroup(
-            "PUMPING STATION — NAIROBI WATER",
-            _PUMP_TRENDS)
-        self._hx_group = _ProcessTrendGroup(
-            "HEAT EXCHANGER — KENGEN OLKARIA",
-            _HX_TRENDS)
-        self._boiler_group = _ProcessTrendGroup(
-            "BOILER — EABL/BIDCO",
-            _BOILER_TRENDS)
-        self._pipeline_group = _ProcessTrendGroup(
-            "PIPELINE — KENYA PIPELINE CO.",
-            _PIPELINE_TRENDS)
+        sub = QLabel("120-point rolling history  —  updates every poll cycle")
+        sub.setStyleSheet(theme.STYLE_DIM)
+        root.addWidget(sub)
 
-        content_layout.addWidget(self._pump_group)
-        content_layout.addWidget(self._hx_group)
-        content_layout.addWidget(self._boiler_group)
-        content_layout.addWidget(self._pipeline_group)
-        content_layout.addStretch()
+        # ── Pumping Station ───────────────────────────────────────
+        ps_box = QGroupBox("PUMPING STATION")
+        ps_layout = QVBoxLayout(ps_box)
+        self._ps_level = SparklineWidget(
+            "Tank Level", "%", hi_alarm=90, lo_alarm=10)
+        self._ps_flow  = SparklineWidget(
+            "Pump Flow", "m³/hr")
+        self._ps_press = SparklineWidget(
+            "Discharge Pressure", "bar", hi_alarm=8.0)
+        ps_layout.addWidget(self._ps_level)
+        ps_layout.addWidget(self._ps_flow)
+        ps_layout.addWidget(self._ps_press)
+        root.addWidget(ps_box)
 
-        scroll.setWidget(content)
-        root.addWidget(scroll)
+        # ── Heat Exchanger ────────────────────────────────────────
+        hx_box = QGroupBox("HEAT EXCHANGER")
+        hx_layout = QVBoxLayout(hx_box)
+        self._hx_eff    = SparklineWidget(
+            "Efficiency", "%", lo_alarm=45)
+        self._hx_t_cold = SparklineWidget(
+            "T Cold Out", "°C", hi_alarm=95)
+        self._hx_q      = SparklineWidget(
+            "Heat Duty", "kW")
+        hx_layout.addWidget(self._hx_eff)
+        hx_layout.addWidget(self._hx_t_cold)
+        hx_layout.addWidget(self._hx_q)
+        root.addWidget(hx_box)
 
-    def update_data(self, plant: dict):
-        """Called every WebSocket push — updates all sparklines."""
-        self._pump_group.update_data(
-            plant.get("pumping_station", {}))
-        self._hx_group.update_data(
-            plant.get("heat_exchanger",  {}))
-        self._boiler_group.update_data(
-            plant.get("boiler",          {}))
-        self._pipeline_group.update_data(
-            plant.get("pipeline",        {}))
+        # ── Boiler ────────────────────────────────────────────────
+        bl_box = QGroupBox("BOILER")
+        bl_layout = QVBoxLayout(bl_box)
+        self._bl_press = SparklineWidget(
+            "Drum Pressure", "bar", hi_alarm=10, lo_alarm=6)
+        self._bl_level = SparklineWidget(
+            "Drum Level", "%", hi_alarm=80, lo_alarm=20)
+        self._bl_steam = SparklineWidget(
+            "Steam Flow", "kg/hr")
+        bl_layout.addWidget(self._bl_press)
+        bl_layout.addWidget(self._bl_level)
+        bl_layout.addWidget(self._bl_steam)
+        root.addWidget(bl_box)
+
+        # ── Pipeline ──────────────────────────────────────────────
+        pl_box = QGroupBox("PIPELINE")
+        pl_layout = QVBoxLayout(pl_box)
+        self._pl_outlet = SparklineWidget(
+            "Outlet Pressure", "bar", hi_alarm=55, lo_alarm=30)
+        self._pl_flow   = SparklineWidget(
+            "Flow Rate", "m³/hr", lo_alarm=200)
+        pl_layout.addWidget(self._pl_outlet)
+        pl_layout.addWidget(self._pl_flow)
+        root.addWidget(pl_box)
+
+        root.addStretch()
+        scroll.setWidget(container)
+
+        main = QVBoxLayout(self)
+        main.setContentsMargins(0, 0, 0, 0)
+        main.addWidget(scroll)
+
+    def update_data(self, data: dict):
+        ps = data.get("pumping_station", {})
+        hx = data.get("heat_exchanger",  {})
+        bl = data.get("boiler",          {})
+        pl = data.get("pipeline",        {})
+
+        if ps.get("online"):
+            self._ps_level.push(ps.get("tank_level_pct",        0))
+            self._ps_flow.push(ps.get("pump_flow_m3hr",          0))
+            self._ps_press.push(ps.get("discharge_pressure_bar", 0))
+
+        if hx.get("online"):
+            self._hx_eff.push(hx.get("efficiency_pct",   0))
+            self._hx_t_cold.push(hx.get("T_cold_out_C",  0))
+            self._hx_q.push(hx.get("Q_duty_kW",          0))
+
+        if bl.get("online"):
+            self._bl_press.push(bl.get("drum_pressure_bar", 0))
+            self._bl_level.push(bl.get("drum_level_pct",    0))
+            self._bl_steam.push(bl.get("steam_flow_kghr",   0))
+
+        if pl.get("online"):
+            self._pl_outlet.push(pl.get("outlet_pressure_bar", 0))
+            self._pl_flow.push(pl.get("flow_rate_m3hr",        0))
