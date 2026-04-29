@@ -4,77 +4,101 @@ A label that shows a live process value with unit.
 Color changes based on value range thresholds.
 """
 
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel
+"""
+value_label.py — Numeric value display with unit and label
+MORBION SCADA v02
+"""
+
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
 from PyQt6.QtCore    import Qt
-from theme import C_ACCENT, C_RED, C_YELLOW, C_TEXT2
+import theme
 
 
 class ValueLabel(QWidget):
     """
-    Displays:  LABEL_TEXT    VALUE    UNIT
-    Colors the value by threshold.
+    Displays:
+        LABEL
+        VALUE  unit
+    Colour changes on threshold breach.
     """
 
     def __init__(self, label: str, unit: str = "",
-                 warn_threshold=None, crit_threshold=None,
-                 high_is_bad: bool = True, parent=None):
-        super().__init__(parent)
-        self._warn = warn_threshold
-        self._crit = crit_threshold
-        self._high_is_bad = high_is_bad
+                 hi_alarm: float = None, lo_alarm: float = None,
+                 decimals: int = 1):
+        super().__init__()
+        self._unit     = unit
+        self._hi       = hi_alarm
+        self._lo       = lo_alarm
+        self._decimals = decimals
 
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 2, 0, 2)
-        layout.setSpacing(4)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(2)
 
-        self._lbl_label = QLabel(label.upper())
-        self._lbl_label.setStyleSheet(f"color: {C_TEXT2}; font-size:10px; letter-spacing:1px;")
-        self._lbl_label.setMinimumWidth(140)
+        self._lbl = QLabel(label.upper())
+        self._lbl.setStyleSheet(theme.STYLE_DIM)
+        self._lbl.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(self._lbl)
 
-        self._lbl_value = QLabel("—")
-        self._lbl_value.setStyleSheet(f"color: {C_ACCENT}; font-size:13px; font-weight:bold;")
-        self._lbl_value.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self._lbl_value.setMinimumWidth(80)
+        row = QHBoxLayout()
+        row.setSpacing(4)
 
-        self._lbl_unit = QLabel(unit)
-        self._lbl_unit.setStyleSheet(f"color: {C_TEXT2}; font-size:9px;")
-        self._lbl_unit.setMinimumWidth(40)
+        self._val = QLabel("—")
+        self._val.setStyleSheet(
+            f"color: {theme.TEXT}; font-family: 'Courier New', monospace; "
+            f"font-size: 18px; font-weight: bold; background: transparent;"
+        )
+        row.addWidget(self._val)
 
-        layout.addWidget(self._lbl_label)
-        layout.addStretch()
-        layout.addWidget(self._lbl_value)
-        layout.addWidget(self._lbl_unit)
+        self._unit_lbl = QLabel(unit)
+        self._unit_lbl.setStyleSheet(theme.STYLE_DIM)
+        self._unit_lbl.setAlignment(
+            Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignLeft
+        )
+        row.addWidget(self._unit_lbl)
+        row.addStretch()
+        layout.addLayout(row)
 
-    def set_value(self, value, decimals: int = 1):
+        self.setStyleSheet(
+            f"background: {theme.SURFACE}; "
+            f"border: 1px solid {theme.BORDER}; "
+            f"border-radius: 2px;"
+        )
+
+    def set_value(self, value, override_color: str = None):
         if value is None:
-            self._lbl_value.setText("—")
-            self._lbl_value.setStyleSheet(f"color: {C_TEXT2}; font-size:13px; font-weight:bold;")
+            self._val.setText("—")
+            self._val.setStyleSheet(
+                f"color: {theme.TEXT_DIM}; font-family: 'Courier New', monospace; "
+                f"font-size: 18px; font-weight: bold; background: transparent;"
+            )
             return
 
         if isinstance(value, bool):
-            text = "YES" if value else "NO"
+            text  = "ON" if value else "OFF"
+            color = theme.GREEN if value else theme.TEXT_DIM
         elif isinstance(value, float):
-            text = f"{value:.{decimals}f}"
+            text  = f"{value:.{self._decimals}f}"
+            color = self._color_for(value)
+        elif isinstance(value, int):
+            text  = str(value)
+            color = self._color_for(float(value))
         else:
-            text = str(value)
+            text  = str(value)
+            color = theme.TEXT
 
-        self._lbl_value.setText(text)
+        if override_color:
+            color = override_color
 
-        # Color by threshold
-        color = C_ACCENT
-        if self._crit is not None and self._warn is not None:
-            numeric = value if isinstance(value, (int, float)) else None
-            if numeric is not None:
-                if self._high_is_bad:
-                    if numeric >= self._crit:
-                        color = C_RED
-                    elif numeric >= self._warn:
-                        color = C_YELLOW
-                else:
-                    if numeric <= self._crit:
-                        color = C_RED
-                    elif numeric <= self._warn:
-                        color = C_YELLOW
+        self._val.setText(text)
+        self._val.setStyleSheet(
+            f"color: {color}; font-family: 'Courier New', monospace; "
+            f"font-size: 18px; font-weight: bold; background: transparent;"
+        )
 
-        self._lbl_value.setStyleSheet(
-            f"color: {color}; font-size:13px; font-weight:bold;")
+    def _color_for(self, v: float) -> str:
+        if self._hi is not None and v >= self._hi:
+            return theme.RED
+        if self._lo is not None and v <= self._lo:
+            return theme.AMBER
+        return theme.GREEN
