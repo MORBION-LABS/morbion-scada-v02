@@ -8,10 +8,18 @@ KEY FIX FROM v01:
   v02 uses empty string default and validates in MorbionMainWindow.
 """
 
+"""
+main.py — MORBION SCADA Desktop Client Entry Point
+MORBION SCADA v02
+"""
+
 import sys
 import json
+import os
 import logging
-import argparse
+
+from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore    import Qt
 
 logging.basicConfig(
     level   = logging.INFO,
@@ -19,50 +27,45 @@ logging.basicConfig(
     datefmt = "%Y-%m-%d %H:%M:%S",
 )
 
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore    import Qt
-from main_window     import MorbionMainWindow
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
 
 
-def load_config(path: str) -> dict:
+def load_config() -> dict:
+    defaults = {
+        "server_host": "192.168.100.30",
+        "server_port": 5000,
+        "operator":    "OPERATOR",
+    }
+    if not os.path.exists(CONFIG_PATH):
+        return defaults
     try:
-        with open(path) as f:
-            return json.load(f)
-    except FileNotFoundError:
-        print(f"Config not found: {path}")
-        print("Run: python3 installer.py")
-        # Return safe defaults — main window will show error
-        return {
-            "server": {"host": "", "port": 5000},
-            "ui": {
-                "window_title":          "MORBION SCADA v2.0",
-                "window_width":          1600,
-                "window_height":         950,
-                "sparkline_points":      120,
-                "logo_path":             "",
-                "background_image_path": "",
-                "background_opacity":    0.08,
-            }
-        }
-    except json.JSONDecodeError as e:
-        print(f"Config JSON error: {e}")
-        sys.exit(1)
+        with open(CONFIG_PATH) as f:
+            data = json.load(f)
+        defaults.update(data)
+        return defaults
+    except Exception:
+        return defaults
+
+
+def save_config(config: dict):
+    try:
+        with open(CONFIG_PATH, "w") as f:
+            json.dump(config, f, indent=2)
+    except Exception:
+        pass
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="MORBION SCADA Desktop v2.0")
-    parser.add_argument("--config", default="config.json",
-                        help="Path to config.json")
-    args   = parser.parse_args()
-    config = load_config(args.config)
-
     app = QApplication(sys.argv)
-    app.setApplicationName("MORBION SCADA")
-    app.setApplicationVersion("2.0")
+    app.setApplicationName("MORBION SCADA v02")
+    app.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps)
 
-    window = MorbionMainWindow(config)
-    window.show()
+    config = load_config()
+
+    # Import here — after QApplication created
+    from splash import SplashScreen
+    splash = SplashScreen(config, save_config)
+    splash.show()
 
     sys.exit(app.exec())
 
