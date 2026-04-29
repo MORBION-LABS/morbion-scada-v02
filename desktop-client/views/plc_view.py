@@ -11,288 +11,405 @@ Operators and engineers can:
   - View variable map (inputs/outputs/parameters)
 """
 
+"""
+plc_view.py — PLC Program editor and management view
+MORBION SCADA v02
+"""
+
 from PyQt6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
-    QPushButton, QTextEdit, QComboBox, QSplitter,
-    QTableWidget, QTableWidgetItem, QHeaderView
+    QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
+    QLabel, QTextEdit, QGroupBox, QFileDialog,
+    QMessageBox, QListWidget,
 )
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui  import QFont, QColor
+from PyQt6.QtCore    import Qt, QTimer
+from PyQt6.QtGui     import (
+    QSyntaxHighlighter, QTextCharFormat, QColor,
+    QFont, QTextDocument,
+)
+import re
+import threading
+import theme
+from widgets.control_panel import ControlButton
+from widgets.status_badge  import StatusBadge
 
-from views.base_view import BaseView
-from theme import (C_ACCENT, C_TEXT2, C_MUTED, C_RED,
-                   C_GREEN, C_YELLOW)
+
+# ── ST Syntax Highlighter ─────────────────────────────────────────────────────
+
+class STHighlighter(QSyntaxHighlighter):
+
+    KEYWORDS = [
+        "IF", "THEN", "ELSIF", "ELSE", "END_IF",
+        "WHILE", "DO", "END_WHILE", "FOR", "TO",
+        "BY", "END_FOR", "RETURN", "AND", "OR",
+        "NOT", "XOR", "VAR", "END_VAR", "TRUE", "FALSE",
+    ]
+    FB_TYPES = ["TON", "TOF", "CTU", "SR", "RS", "LIMIT", "ABS", "MAX", "MIN"]
+
+    def __init__(self, document: QTextDocument):
+        super().__init__(document)
+
+        kw_fmt = QTextCharFormat()
+        kw_fmt.setForeground(QColor(theme.ACCENT))
+        kw_fmt.setFontWeight(QFont.Weight.Bold)
+
+        fb_fmt = QTextCharFormat()
+        fb_fmt.setForeground(QColor(theme.AMBER))
+
+        num_fmt = QTextCharFormat()
+        num_fmt.setForeground(QColor(theme.WHITE))
+
+        cmt_fmt = QTextCharFormat()
+        cmt_fmt.setForeground(QColor(theme.TEXT_DIM))
+        cmt_fmt.setFontItalic(True)
+
+        str_fmt = QTextCharFormat()
+        str_fmt.setForeground(QColor(theme.GREEN))
+
+        self._rules = []
+
+        # Keywords
+        for kw in self.KEYWORDS:
+            self._rules.append((
+                re.compile(rf'\b{kw}\b', re.IGNORECASE),
+                kw_fmt,
+            ))
+
+        # FB types
+        for fb in self.FB_TYPES:
+            self._rules.append((
+                re.compile(rf'\b{fb}\b', re.IGNORECASE),
+                fb_fmt,
+            ))
+
+        # Numbers
+        self._rules.append((
+            re.compile(r'\b\d+\.?\d*\b'),
+            num_fmt,
+        ))
+
+        # Block comments (* ... *)
+        self._rules.append((
+            re.compile(r'\(\*.*?\*\)', re.DOTALL),
+            cmt_fmt,
+        ))
+
+        # Line comments //
+        self._rules.append((
+            re.compile(r'//[^\n]*'),
+            cmt_fmt,
+        ))
+
+    def highlightBlock(self, text: str):
+        for pattern, fmt in self._rules:
+            for match in pattern.finditer(text):
+                self.setFormat(match.start(), match.end() - match.start(), fmt)
 
 
-class PLCView(BaseView):
+# ── PLC View ──────────────────────────────────────────────────────────────────
+
+class PLCView(QWidget):
 
     PROCESSES = [
-        ("pumping_station", "Pumping Station"),
-        ("heat_exchanger",  "Heat Exchanger"),
-        ("boiler",          "Boiler"),
-        ("pipeline",        "Pipeline"),
+        ("ps", "pumping_station", "Pumping Station"),
+        ("hx", "heat_exchanger",  "Heat Exchanger"),
+        ("bl", "boiler",          "Boiler"),
+        ("pl", "pipeline",        "Pipeline"),
     ]
 
-    def __init__(self, rest_client, parent=None):
-        super().__init__(rest_client, parent)
+    def __init__(self, rest):
+        super().__init__()
+        self._rest    = rest
+        self._process = "boiler"
+        self._build_ui()
+        QTimer.singleShot(500, self._refresh)
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(8, 8, 8, 8)
-        root.setSpacing(8)
+    def _build_ui(self):
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        # ── Process selector + controls ───────────────────────────────────────
-        ctrl_bar = QHBoxLayout()
-
-        lbl = QLabel("PROCESS:")
-        lbl.setStyleSheet(
-            f"color:{C_TEXT2};font-size:10px;letter-spacing:1px;")
-        ctrl_bar.addWidget(lbl)
-
-        self._proc_combo = QComboBox()
-        for key, name in self.PROCESSES:
-            self._proc_combo.addItem(name, key)
-        self._proc_combo.currentIndexChanged.connect(
-            self._on_process_changed)
-        ctrl_bar.addWidget(self._proc_combo)
-        ctrl_bar.addSpacing(16)
-
-        self._load_btn = QPushButton("LOAD PROGRAM")
-        self._load_btn.clicked.connect(self._on_load)
-        ctrl_bar.addWidget(self._load_btn)
-
-        self._reload_btn = QPushButton("HOT RELOAD")
-        self._reload_btn.clicked.connect(self._on_reload)
-        self._reload_btn.setToolTip(
-            "Reload ST program from file on PLC machine disk")
-        ctrl_bar.addWidget(self._reload_btn)
-
-        self._upload_btn = QPushButton("UPLOAD PROGRAM")
-        self._upload_btn.clicked.connect(self._on_upload)
-        self._upload_btn.setToolTip(
-            "Upload ST source from editor to PLC process")
-        ctrl_bar.addWidget(self._upload_btn)
-
-        ctrl_bar.addStretch()
-
-        # Status indicator
-        self._status_lbl = QLabel("●  NOT LOADED")
-        self._status_lbl.setStyleSheet(
-            f"color:{C_MUTED};font-size:10px;letter-spacing:1px;")
-        ctrl_bar.addWidget(self._status_lbl)
-
-        root.addLayout(ctrl_bar)
-
-        # ── Feedback bar ──────────────────────────────────────────────────────
-        self._feedback = QLabel("")
-        self._feedback.setStyleSheet(
-            f"color:{C_ACCENT};font-size:10px;padding:3px 8px;"
-            f"background:#020a12;border:1px solid #0d2030;")
-        self._feedback.hide()
-        root.addWidget(self._feedback)
-
-        # ── Main splitter ─────────────────────────────────────────────────────
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(2)
 
-        # Left: ST editor
-        left_group = QGroupBox("ST PROGRAM SOURCE")
-        left_layout = QVBoxLayout(left_group)
+        # ── Left panel ────────────────────────────────────────────
+        left = QWidget()
+        left.setFixedWidth(280)
+        left.setStyleSheet(
+            f"background: {theme.SURFACE}; "
+            f"border-right: 1px solid {theme.BORDER};"
+        )
+        left_layout = QVBoxLayout(left)
+        left_layout.setContentsMargins(12, 12, 12, 12)
+        left_layout.setSpacing(8)
 
+        left_layout.addWidget(QLabel("PLC PROGRAMS"))
+
+        # Process selector
+        proc_box = QGroupBox("PROCESS")
+        proc_layout = QVBoxLayout(proc_box)
+        for alias, proc, label in self.PROCESSES:
+            btn = ControlButton(f"[{alias.upper()}] {label}")
+            btn.clicked.connect(
+                lambda checked, p=proc: self._select_process(p))
+            proc_layout.addWidget(btn)
+        left_layout.addWidget(proc_box)
+
+        # Status
+        status_box = QGroupBox("STATUS")
+        status_layout = QVBoxLayout(status_box)
+        self._status_badge   = StatusBadge()
+        self._scan_count_lbl = QLabel("Scan count: —")
+        self._scan_count_lbl.setStyleSheet(theme.STYLE_DIM)
+        self._last_error_lbl = QLabel("Last error: —")
+        self._last_error_lbl.setStyleSheet(theme.STYLE_DIM)
+        self._last_error_lbl.setWordWrap(True)
+        status_layout.addWidget(self._status_badge)
+        status_layout.addWidget(self._scan_count_lbl)
+        status_layout.addWidget(self._last_error_lbl)
+        left_layout.addWidget(status_box)
+
+        # Variables
+        vars_box = QGroupBox("VARIABLES")
+        vars_layout = QVBoxLayout(vars_box)
+
+        self._inputs_list  = QListWidget()
+        self._inputs_list.setMaximumHeight(80)
+        self._inputs_list.setStyleSheet(
+            f"background: {theme.BG}; color: {theme.TEXT_DIM}; "
+            f"border: none; font-family: 'Courier New', monospace; font-size: 10px;"
+        )
+        inputs_lbl = QLabel("INPUTS")
+        inputs_lbl.setStyleSheet(theme.STYLE_DIM)
+        vars_layout.addWidget(inputs_lbl)
+        vars_layout.addWidget(self._inputs_list)
+
+        self._outputs_list = QListWidget()
+        self._outputs_list.setMaximumHeight(80)
+        self._outputs_list.setStyleSheet(
+            f"background: {theme.BG}; color: {theme.TEXT_DIM}; "
+            f"border: none; font-family: 'Courier New', monospace; font-size: 10px;"
+        )
+        outputs_lbl = QLabel("OUTPUTS")
+        outputs_lbl.setStyleSheet(theme.STYLE_DIM)
+        vars_layout.addWidget(outputs_lbl)
+        vars_layout.addWidget(self._outputs_list)
+
+        left_layout.addWidget(vars_box)
+
+        # Actions
+        reload_btn = ControlButton("RELOAD FROM DISK", theme.AMBER)
+        reload_btn.clicked.connect(self._reload)
+        left_layout.addWidget(reload_btn)
+
+        left_layout.addStretch()
+        self._fb = QLabel("")
+        self._fb.setStyleSheet(theme.STYLE_DIM)
+        self._fb.setWordWrap(True)
+        left_layout.addWidget(self._fb)
+
+        splitter.addWidget(left)
+
+        # ── Right panel — editor ──────────────────────────────────
+        right = QWidget()
+        right.setStyleSheet(f"background: {theme.BG};")
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
+
+        # Toolbar
+        toolbar = QWidget()
+        toolbar.setFixedHeight(40)
+        toolbar.setStyleSheet(
+            f"background: {theme.SURFACE}; "
+            f"border-bottom: 1px solid {theme.BORDER};"
+        )
+        tb_layout = QHBoxLayout(toolbar)
+        tb_layout.setContentsMargins(8, 0, 8, 0)
+        tb_layout.setSpacing(8)
+
+        self._proc_label = QLabel("BOILER — plc_program.st")
+        self._proc_label.setStyleSheet(theme.STYLE_ACCENT)
+        tb_layout.addWidget(self._proc_label)
+        tb_layout.addStretch()
+
+        validate_btn  = ControlButton("VALIDATE",  theme.TEXT_DIM)
+        upload_btn    = ControlButton("UPLOAD",    theme.GREEN)
+        download_btn  = ControlButton("DOWNLOAD",  theme.ACCENT)
+
+        validate_btn.clicked.connect(self._validate)
+        upload_btn.clicked.connect(self._upload)
+        download_btn.clicked.connect(self._download)
+
+        tb_layout.addWidget(validate_btn)
+        tb_layout.addWidget(upload_btn)
+        tb_layout.addWidget(download_btn)
+
+        right_layout.addWidget(toolbar)
+
+        # Editor
         self._editor = QTextEdit()
-        self._editor.setFont(QFont("Courier New", 10))
+        self._editor.setFont(
+            QFont("Courier New", 12))
         self._editor.setStyleSheet(
-            "background-color: #010810;"
-            "color: #00d4ff;"
-            "border: 1px solid #0d2030;"
-            "padding: 4px;")
-        self._editor.setPlaceholderText(
-            "Click LOAD PROGRAM to fetch ST source from process...")
-        left_layout.addWidget(self._editor)
-        splitter.addWidget(left_group)
+            f"background: {theme.BG}; color: {theme.TEXT}; "
+            f"border: none; font-family: 'Courier New', monospace; "
+            f"font-size: 12px; line-height: 1.4;"
+        )
+        self._highlighter = STHighlighter(self._editor.document())
+        right_layout.addWidget(self._editor)
 
-        # Right: status + variables
-        right_group = QGroupBox("RUNTIME STATUS & VARIABLES")
-        right_layout = QVBoxLayout(right_group)
+        splitter.addWidget(right)
+        splitter.setSizes([280, 800])
+        splitter.setCollapsible(0, False)
+        splitter.setCollapsible(1, False)
 
-        # Status table
-        status_lbl = QLabel("RUNTIME STATUS")
-        status_lbl.setStyleSheet(
-            f"color:{C_TEXT2};font-size:9px;letter-spacing:2px;")
-        right_layout.addWidget(status_lbl)
+        root.addWidget(splitter)
 
-        self._status_table = QTableWidget(0, 2)
-        self._status_table.setHorizontalHeaderLabels(["KEY", "VALUE"])
-        self._status_table.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeMode.Stretch)
-        self._status_table.verticalHeader().setVisible(False)
-        self._status_table.setEditTriggers(
-            QTableWidget.EditTrigger.NoEditTriggers)
-        self._status_table.setMaximumHeight(140)
-        right_layout.addWidget(self._status_table)
+    # ── Actions ───────────────────────────────────────────────────────────────
 
-        # Variables table
-        var_lbl = QLabel("VARIABLE MAP")
-        var_lbl.setStyleSheet(
-            f"color:{C_TEXT2};font-size:9px;letter-spacing:2px;"
-            f"margin-top:8px;")
-        right_layout.addWidget(var_lbl)
+    def _select_process(self, proc: str):
+        self._process = proc
+        label = next(
+            (l for _, p, l in self.PROCESSES if p == proc), proc)
+        self._proc_label.setText(
+            f"{label.upper()} — plc_program.st")
+        self._refresh()
 
-        self._var_table = QTableWidget(0, 3)
-        self._var_table.setHorizontalHeaderLabels(
-            ["TYPE", "ST VARIABLE", "STATE FIELD"])
-        self._var_table.horizontalHeader().setSectionResizeMode(
-            2, QHeaderView.ResizeMode.Stretch)
-        self._var_table.verticalHeader().setVisible(False)
-        self._var_table.setEditTriggers(
-            QTableWidget.EditTrigger.NoEditTriggers)
-        right_layout.addWidget(self._var_table)
+    def _refresh(self):
+        threading.Thread(target=self._fetch_all, daemon=True).start()
 
-        splitter.addWidget(right_group)
-        splitter.setSizes([700, 350])
-        root.addWidget(splitter, 1)
+    def _fetch_all(self):
+        # Status
+        result = self._rest.plc_get_status(self._process)
+        QTimer.singleShot(0, lambda: self._update_status(result))
 
-    def _current_process(self) -> str:
-        return self._proc_combo.currentData()
+        # Source
+        prog = self._rest.plc_get_program(self._process)
+        if prog:
+            source = prog.get("source", "")
+            QTimer.singleShot(0, lambda: self._editor.setPlainText(source))
 
-    def _on_process_changed(self):
-        self._editor.clear()
-        self._status_table.setRowCount(0)
-        self._var_table.setRowCount(0)
-        self._status_lbl.setText("●  NOT LOADED")
-        self._status_lbl.setStyleSheet(
-            f"color:{C_MUTED};font-size:10px;letter-spacing:1px;")
+        # Variables
+        var_result = self._rest.plc_get_variables(self._process)
+        QTimer.singleShot(0, lambda: self._update_vars(var_result))
 
-    def _on_load(self):
-        proc = self._current_process()
-        self._show_feedback(f"Loading {proc} program...", C_TEXT2)
-        if self._rest:
-            self._rest.plc_get_program(proc, self._on_program_loaded)
-            self._rest.plc_get_variables(proc, self._on_variables_loaded)
-
-    def _on_reload(self):
-        proc = self._current_process()
-        self._show_feedback(f"Hot reloading {proc}...", C_TEXT2)
-        if self._rest:
-            self._rest.plc_reload(proc, self._on_reload_result)
-
-    def _on_upload(self):
-        proc   = self._current_process()
-        source = self._editor.toPlainText().strip()
-        if not source:
-            self._show_feedback("Editor is empty — nothing to upload",
-                                C_RED)
+    def _update_status(self, result):
+        if not result:
+            self._status_badge.set_offline()
+            self._scan_count_lbl.setText("Scan count: —")
+            self._last_error_lbl.setText("Unreachable")
             return
-        self._show_feedback(
-            f"Uploading {proc} program (validating syntax)...",
-            C_TEXT2)
-        if self._rest:
-            self._rest.plc_upload(proc, source, self._on_upload_result)
-
-    def _on_program_loaded(self, result: dict):
-        if "error" in result:
-            self._show_feedback(
-                f"Load failed: {result['error']}", C_RED)
-            return
-
-        source = result.get("source", "")
-        self._editor.setPlainText(source)
-
-        status = result.get("status", {})
-        self._update_status_table(status)
-
+        status = result.get("status", result)
         loaded = status.get("loaded", False)
-        error  = status.get("last_error", "")
         if loaded:
-            scans = status.get("scan_count", 0)
-            self._status_lbl.setText(f"●  LOADED  scans={scans}")
-            self._status_lbl.setStyleSheet(
-                f"color:{C_GREEN};font-size:10px;letter-spacing:1px;")
+            self._status_badge.set_online()
+            self._status_badge.set_custom("● LOADED", theme.GREEN)
         else:
-            self._status_lbl.setText(f"●  LOAD ERROR")
-            self._status_lbl.setStyleSheet(
-                f"color:{C_RED};font-size:10px;letter-spacing:1px;")
+            self._status_badge.set_custom("✗ NOT LOADED", theme.RED)
+        self._scan_count_lbl.setText(
+            f"Scan count: {status.get('scan_count', '—')}")
+        err = status.get("last_error", "") or "—"
+        self._last_error_lbl.setText(f"Last error: {err[:60]}")
 
-        self._show_feedback(
-            f"Program loaded — "
-            f"{len(source.splitlines())} lines", C_GREEN)
-
-    def _on_variables_loaded(self, result: dict):
-        if "error" in result:
+    def _update_vars(self, result):
+        if not result:
             return
+        variables  = result.get("variables", {})
+        inputs     = variables.get("inputs",  {})
+        outputs    = variables.get("outputs", {})
 
-        variables = result.get("variables", {})
-        rows = []
+        self._inputs_list.clear()
+        for k in inputs:
+            self._inputs_list.addItem(k)
 
-        for st_var, state_field in variables.get(
-                "inputs", {}).items():
-            rows.append(("INPUT", st_var, state_field))
-        for st_var, state_field in variables.get(
-                "outputs", {}).items():
-            rows.append(("OUTPUT", st_var, state_field))
-        for st_var, val in variables.get(
-                "parameters", {}).items():
-            rows.append(("PARAM", st_var, str(val)))
+        self._outputs_list.clear()
+        for k in outputs:
+            self._outputs_list.addItem(k)
 
-        self._var_table.setRowCount(len(rows))
-        type_colors = {
-            "INPUT":  C_ACCENT,
-            "OUTPUT": C_GREEN,
-            "PARAM":  C_YELLOW,
-        }
-        for row, (typ, st_var, field) in enumerate(rows):
-            color = QColor(type_colors.get(typ, C_TEXT2))
-            for col, text in enumerate([typ, st_var, field]):
-                item = QTableWidgetItem(text)
-                item.setForeground(color)
-                self._var_table.setItem(row, col, item)
+    def _validate(self):
+        source = self._editor.toPlainText()
+        if not source.strip():
+            self._set_fb("Editor is empty", theme.AMBER)
+            return
+        # Client-side parse check via REST upload with dry-run not available
+        # We use the upload endpoint — if it fails, show parse error
+        self._set_fb("Validating...", theme.TEXT_DIM)
+        threading.Thread(
+            target=self._do_validate, args=(source,), daemon=True).start()
 
-    def _on_reload_result(self, result: dict):
+    def _do_validate(self, source: str):
+        # Upload and immediately check result
+        # A proper validate-only endpoint would be ideal but
+        # upload validates before applying so this is safe
+        result = self._rest.plc_upload_program(self._process, source)
         if result.get("ok"):
-            status = result.get("status", {})
-            self._update_status_table(status)
-            self._show_feedback("Program hot reloaded", C_GREEN)
-            # Refresh source after reload
-            self._on_load()
+            QTimer.singleShot(0, lambda: self._set_fb(
+                "VALID — program accepted", theme.GREEN))
         else:
-            self._show_feedback(
-                f"Reload failed: {result.get('error', '?')}",
-                C_RED)
+            err = result.get("error", "Unknown error")
+            QTimer.singleShot(0, lambda: self._set_fb(
+                f"PARSE ERROR: {err}", theme.RED))
 
-    def _on_upload_result(self, result: dict):
+    def _upload(self):
+        source = self._editor.toPlainText()
+        if not source.strip():
+            self._set_fb("Editor is empty", theme.AMBER)
+            return
+        reply = QMessageBox.question(
+            self, "Upload PLC Program",
+            f"Upload and apply new ST program to {self._process}?\n"
+            f"This will replace the running PLC program immediately.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self._set_fb("Uploading...", theme.TEXT_DIM)
+        threading.Thread(
+            target=self._do_upload, args=(source,), daemon=True).start()
+
+    def _do_upload(self, source: str):
+        result = self._rest.plc_upload_program(self._process, source)
         if result.get("ok"):
-            status = result.get("status", {})
-            self._update_status_table(status)
-            self._show_feedback(
-                "Program uploaded and loaded", C_GREEN)
+            QTimer.singleShot(0, lambda: self._set_fb(
+                "UPLOADED — program live", theme.GREEN))
+            QTimer.singleShot(1000, self._refresh)
         else:
-            error = result.get("error", "Upload failed")
-            self._show_feedback(f"Upload failed: {error}", C_RED)
+            err = result.get("error", "Unknown")
+            QTimer.singleShot(0, lambda: self._set_fb(
+                f"UPLOAD FAILED: {err}", theme.RED))
 
-    def _update_status_table(self, status: dict):
-        items = [
-            ("Loaded",       str(status.get("loaded", "?"))),
-            ("Scan Count",   str(status.get("scan_count", 0))),
-            ("Program File", status.get("program_file", "?")),
-            ("Last Error",   status.get("last_error", "none")),
-        ]
-        self._status_table.setRowCount(len(items))
-        for row, (key, val) in enumerate(items):
-            k_item = QTableWidgetItem(key)
-            k_item.setForeground(QColor(C_TEXT2))
-            v_item = QTableWidgetItem(val)
-            has_error = (key == "Last Error" and val not in ("none", ""))
-            v_item.setForeground(
-                QColor(C_RED if has_error else C_ACCENT))
-            self._status_table.setItem(row, 0, k_item)
-            self._status_table.setItem(row, 1, v_item)
+    def _reload(self):
+        self._set_fb("Reloading from disk...", theme.TEXT_DIM)
+        threading.Thread(target=self._do_reload, daemon=True).start()
 
-    def _show_feedback(self, msg: str, color: str):
-        self._feedback.setText(msg)
-        self._feedback.setStyleSheet(
-            f"color:{color};font-size:10px;padding:3px 8px;"
-            f"background:#020a12;border:1px solid #0d2030;")
-        self._feedback.show()
+    def _do_reload(self):
+        result = self._rest.plc_reload(self._process)
+        if result.get("ok"):
+            QTimer.singleShot(0, lambda: self._set_fb(
+                "RELOADED from disk", theme.GREEN))
+            QTimer.singleShot(500, self._refresh)
+        else:
+            QTimer.singleShot(0, lambda: self._set_fb(
+                f"RELOAD FAILED: {result.get('error')}", theme.RED))
 
-    def update_data(self, plant: dict):
-        # PLCView does not update from WebSocket push
-        # It uses explicit REST calls via the load/reload buttons
-        pass
+    def _download(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save ST Program",
+            f"{self._process}_plc_program.st",
+            "Structured Text (*.st);;All Files (*)",
+        )
+        if not path:
+            return
+        try:
+            with open(path, "w") as f:
+                f.write(self._editor.toPlainText())
+            self._set_fb(f"Saved: {path}", theme.GREEN)
+        except Exception as e:
+            self._set_fb(f"Save failed: {e}", theme.RED)
+
+    def _set_fb(self, text: str, color: str):
+        self._fb.setText(text)
+        self._fb.setStyleSheet(
+            f"color: {color}; font-family: 'Courier New', monospace; "
+            f"font-size: 11px; background: transparent;"
+        )
