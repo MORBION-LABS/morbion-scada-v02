@@ -1,158 +1,178 @@
 """
-MORBION — Overview View
-Plant-level summary. All 4 processes. Active alarms.
+overview_view.py — 4-process overview dashboard
+MORBION SCADA v02
 """
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QLabel, QGroupBox, QTableWidget, QTableWidgetItem,
-    QHeaderView, QSizePolicy
+    QLabel, QGroupBox, QScrollArea,
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui  import QColor
+import theme
+from widgets.status_badge  import StatusBadge
+from widgets.gauge_widget  import GaugeWidget
+from widgets.value_label   import ValueLabel
 
-from widgets.status_badge import StatusBadge, SeverityBadge
-from views.base_view      import BaseView
-from theme import C_ACCENT, C_TEXT2, C_MUTED, C_RED, C_GREEN, C_YELLOW, SEV_COLORS
 
+class _ProcessCard(QGroupBox):
 
-class ProcessCard(QGroupBox):
-    """Mini summary card for one process."""
-
-    _METRICS = {
-        "pumping_station": [
-            ("Tank Level",   "tank_level_pct",       "%",   1),
-            ("Pump Flow",    "pump_flow_m3hr",        "m³/hr", 1),
-            ("Discharge P",  "discharge_pressure_bar","bar", 2),
-        ],
-        "heat_exchanger": [
-            ("T Hot In",    "T_hot_in_C",    "°C", 1),
-            ("T Cold Out",  "T_cold_out_C",  "°C", 1),
-            ("Efficiency",  "efficiency_pct","%",  1),
-        ],
-        "boiler": [
-            ("Drum Press",  "drum_pressure_bar", "bar", 2),
-            ("Drum Level",  "drum_level_pct",    "%",   1),
-            ("Steam Flow",  "steam_flow_kghr",   "kg/hr", 0),
-        ],
-        "pipeline": [
-            ("Outlet P",    "outlet_pressure_bar","bar",  2),
-            ("Flow Rate",   "flow_rate_m3hr",    "m³/hr", 1),
-            ("Duty Pump",   "duty_pump_running", "",      0),
-        ],
-    }
-
-    def __init__(self, process_key: str, label: str, location: str, parent=None):
-        super().__init__(label)
-        self._key      = process_key
-        self._rows     = []
-        layout = QVBoxLayout(self)
-        layout.setSpacing(4)
+    def __init__(self, title: str, location: str):
+        super().__init__(title)
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(8, 12, 8, 8)
+        self._layout.setSpacing(6)
 
         self._badge = StatusBadge()
-        layout.addWidget(self._badge)
+        loc = QLabel(location)
+        loc.setStyleSheet(theme.STYLE_DIM)
+        self._layout.addWidget(self._badge)
+        self._layout.addWidget(loc)
+        self._layout.addSpacing(4)
 
-        self._loc = QLabel(location)
-        self._loc.setStyleSheet(f"color:{C_MUTED};font-size:9px;")
-        layout.addWidget(self._loc)
+    def add_gauge(self, gauge: GaugeWidget):
+        self._layout.addWidget(gauge)
 
-        for (display, key, unit, dec) in self._METRICS.get(process_key, []):
-            row = QHBoxLayout()
-            lbl = QLabel(display)
-            lbl.setStyleSheet(f"color:{C_TEXT2};font-size:9px;")
-            val = QLabel("—")
-            val.setStyleSheet(f"color:{C_ACCENT};font-size:11px;font-weight:bold;")
-            val.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            u = QLabel(unit)
-            u.setStyleSheet(f"color:{C_MUTED};font-size:9px;")
-            u.setFixedWidth(36)
-            row.addWidget(lbl)
-            row.addStretch()
-            row.addWidget(val)
-            row.addWidget(u)
-            layout.addLayout(row)
-            self._rows.append((key, val, dec))
+    def add_value(self, val: ValueLabel):
+        self._layout.addWidget(val)
 
-        layout.addStretch()
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-
-    def update_data(self, data: dict):
-        self._badge.update_process(data)
-        for (key, val_lbl, dec) in self._rows:
-            v = data.get(key)
-            if v is None:
-                val_lbl.setText("—")
-            elif isinstance(v, bool):
-                val_lbl.setText("RUN" if v else "STOP")
-                val_lbl.setStyleSheet(
-                    f"color:{C_GREEN if v else C_MUTED};font-size:11px;font-weight:bold;")
-            elif isinstance(v, float):
-                val_lbl.setText(f"{v:.{dec}f}")
-            else:
-                val_lbl.setText(str(v))
+    def set_online(self, online: bool, fault: int = 0, fault_text: str = ""):
+        if not online:
+            self._badge.set_offline()
+        elif fault > 0:
+            self._badge.set_fault(fault, fault_text)
+        else:
+            self._badge.set_online()
 
 
-class OverviewView(BaseView):
+class OverviewView(QWidget):
 
-    _PROCS = [
-        ("pumping_station", "PUMPING STATION",  "Nairobi Water — Municipal"),
-        ("heat_exchanger",  "HEAT EXCHANGER",   "KenGen Olkaria — Geothermal"),
-        ("boiler",          "BOILER",            "EABL/Bidco — Industrial Steam"),
-        ("pipeline",        "PIPELINE",          "Kenya Pipeline Co. — Petroleum"),
-    ]
+    def __init__(self, rest):
+        super().__init__()
+        self._rest = rest
+        self._build_ui()
 
-    def __init__(self, rest_client, parent=None):
-        super().__init__(rest_client, parent)
-        self._cards = {}
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(12)
+    def _build_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(12)
 
-        # Process cards grid
+        # Title
+        title = QLabel("PLANT OVERVIEW")
+        title.setStyleSheet(theme.STYLE_HEADER)
+        root.addWidget(title)
+
+        sub = QLabel("MORBION SCADA v02  —  Intelligence. Precision. Vigilance.")
+        sub.setStyleSheet(theme.STYLE_DIM)
+        root.addWidget(sub)
+
+        # 2x2 grid of process cards
         grid = QGridLayout()
         grid.setSpacing(12)
-        for i, (key, label, loc) in enumerate(self._PROCS):
-            card = ProcessCard(key, label, loc)
-            self._cards[key] = card
-            grid.addWidget(card, 0, i)
-        layout.addLayout(grid)
 
-        # Alarms table
-        alarm_group = QGroupBox("ACTIVE ALARMS — ALL PROCESSES")
-        alarm_layout = QVBoxLayout(alarm_group)
-        self._alarm_table = QTableWidget(0, 5)
-        self._alarm_table.setHorizontalHeaderLabels(["SEV", "PROCESS", "TAG", "DESCRIPTION", "TIME"])
-        self._alarm_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-        self._alarm_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._alarm_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._alarm_table.verticalHeader().setVisible(False)
-        self._alarm_table.setAlternatingRowColors(False)
-        self._alarm_table.setColumnWidth(0, 60)
-        self._alarm_table.setColumnWidth(1, 140)
-        self._alarm_table.setColumnWidth(2, 130)
-        self._alarm_table.setColumnWidth(4, 70)
-        alarm_layout.addWidget(self._alarm_table)
-        layout.addWidget(alarm_group, 1)
+        # ── Pumping Station ───────────────────────────────────────
+        self._ps_card = _ProcessCard(
+            "PUMPING STATION", "Nairobi Water — Municipal")
+        self._ps_level = GaugeWidget(
+            "Tank Level", "%", 0, 100, hi_alarm=90, lo_alarm=10)
+        self._ps_flow  = GaugeWidget(
+            "Pump Flow", "m³/hr", 0, 150)
+        self._ps_press = ValueLabel(
+            "Discharge Pressure", "bar", hi_alarm=8.0)
+        self._ps_card.add_gauge(self._ps_level)
+        self._ps_card.add_gauge(self._ps_flow)
+        self._ps_card.add_value(self._ps_press)
+        grid.addWidget(self._ps_card, 0, 0)
 
-    def update_data(self, plant: dict):
-        for key, card in self._cards.items():
-            card.update_data(plant.get(key, {"online": False}))
-        self._update_alarms(plant.get("alarms", []))
+        # ── Heat Exchanger ────────────────────────────────────────
+        self._hx_card = _ProcessCard(
+            "HEAT EXCHANGER", "KenGen Olkaria — Geothermal")
+        self._hx_eff   = GaugeWidget(
+            "Efficiency", "%", 0, 100, lo_alarm=45)
+        self._hx_t_hot = ValueLabel(
+            "T Hot In", "°C", hi_alarm=200)
+        self._hx_t_cold= ValueLabel(
+            "T Cold Out", "°C", hi_alarm=95)
+        self._hx_card.add_gauge(self._hx_eff)
+        self._hx_card.add_value(self._hx_t_hot)
+        self._hx_card.add_value(self._hx_t_cold)
+        grid.addWidget(self._hx_card, 0, 1)
 
-    def _update_alarms(self, alarms: list):
-        self._alarm_table.setRowCount(len(alarms))
-        for row, a in enumerate(alarms):
-            sev   = a.get("sev", "LOW")
-            color = QColor(SEV_COLORS.get(sev, C_MUTED))
+        # ── Boiler ────────────────────────────────────────────────
+        self._bl_card  = _ProcessCard(
+            "BOILER", "EABL/Bidco — Industrial Steam")
+        self._bl_press = GaugeWidget(
+            "Drum Pressure", "bar", 0, 12, hi_alarm=10, lo_alarm=6)
+        self._bl_level = GaugeWidget(
+            "Drum Level", "%", 0, 100, hi_alarm=80, lo_alarm=20)
+        self._bl_steam = ValueLabel(
+            "Steam Flow", "kg/hr")
+        self._bl_card.add_gauge(self._bl_press)
+        self._bl_card.add_gauge(self._bl_level)
+        self._bl_card.add_value(self._bl_steam)
+        grid.addWidget(self._bl_card, 1, 0)
 
-            items = [
-                sev,
-                a.get("process", "—").replace("_", " ").upper(),
-                a.get("tag", "—"),
-                a.get("desc", "—"),
-                a.get("ts", "—"),
-            ]
-            for col, text in enumerate(items):
-                item = QTableWidgetItem(text)
-                item.setForeground(color)
-                self._alarm_table.setItem(row, col, item)
+        # ── Pipeline ──────────────────────────────────────────────
+        self._pl_card  = _ProcessCard(
+            "PIPELINE", "Kenya Pipeline Co. — Petroleum")
+        self._pl_out   = GaugeWidget(
+            "Outlet Pressure", "bar", 0, 60, hi_alarm=55, lo_alarm=30)
+        self._pl_flow  = GaugeWidget(
+            "Flow Rate", "m³/hr", 0, 600)
+        self._pl_leak  = ValueLabel("Leak Flag", "")
+        self._pl_card.add_gauge(self._pl_out)
+        self._pl_card.add_gauge(self._pl_flow)
+        self._pl_card.add_value(self._pl_leak)
+        grid.addWidget(self._pl_card, 1, 1)
+
+        root.addLayout(grid)
+        root.addStretch()
+
+    def update_data(self, data: dict):
+        ps = data.get("pumping_station", {})
+        hx = data.get("heat_exchanger",  {})
+        bl = data.get("boiler",          {})
+        pl = data.get("pipeline",        {})
+
+        # Pumping station
+        self._ps_card.set_online(
+            ps.get("online", False),
+            ps.get("fault_code", 0),
+            ps.get("fault_text", ""),
+        )
+        self._ps_level.set_value(ps.get("tank_level_pct", 0))
+        self._ps_flow.set_value(ps.get("pump_flow_m3hr", 0))
+        self._ps_press.set_value(ps.get("discharge_pressure_bar", 0))
+
+        # Heat exchanger
+        self._hx_card.set_online(
+            hx.get("online", False),
+            hx.get("fault_code", 0),
+            hx.get("fault_text", ""),
+        )
+        self._hx_eff.set_value(hx.get("efficiency_pct", 0))
+        self._hx_t_hot.set_value(hx.get("T_hot_in_C", 0))
+        self._hx_t_cold.set_value(hx.get("T_cold_out_C", 0))
+
+        # Boiler
+        self._bl_card.set_online(
+            bl.get("online", False),
+            bl.get("fault_code", 0),
+            bl.get("fault_text", ""),
+        )
+        self._bl_press.set_value(bl.get("drum_pressure_bar", 0))
+        self._bl_level.set_value(bl.get("drum_level_pct", 0))
+        self._bl_steam.set_value(bl.get("steam_flow_kghr", 0))
+
+        # Pipeline
+        self._pl_card.set_online(
+            pl.get("online", False),
+            pl.get("fault_code", 0),
+            pl.get("fault_text", ""),
+        )
+        self._pl_out.set_value(pl.get("outlet_pressure_bar", 0))
+        self._pl_flow.set_value(pl.get("flow_rate_m3hr", 0))
+        leak = pl.get("leak_flag", False)
+        self._pl_leak.set_value(
+            "LEAK SUSPECTED" if leak else "OK",
+            override_color=theme.RED if leak else theme.GREEN,
+        )
