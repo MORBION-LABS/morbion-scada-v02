@@ -1,87 +1,120 @@
 """
-MORBION — GaugeWidget
-Arc gauge. Animates smoothly.
+gauge_widget.py — Horizontal bar gauge
+MORBION SCADA v02
 """
 
-import math
-from PyQt6.QtWidgets import QWidget
-from PyQt6.QtCore    import Qt, QPropertyAnimation, QEasingCurve, pyqtProperty, QRectF
-from PyQt6.QtGui     import QPainter, QColor, QPen, QFont, QConicalGradient
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
+from PyQt6.QtCore    import Qt, QRect
+from PyQt6.QtGui     import QPainter, QColor, QPen
+import theme
 
 
 class GaugeWidget(QWidget):
 
-    START_ANGLE = 225
-    SPAN_ANGLE  = 270
+    def __init__(self, label: str, unit: str = "",
+                 min_val: float = 0.0, max_val: float = 100.0,
+                 hi_alarm: float = None, lo_alarm: float = None,
+                 decimals: int = 1):
+        super().__init__()
+        self._label    = label
+        self._unit     = unit
+        self._min      = min_val
+        self._max      = max_val
+        self._hi       = hi_alarm
+        self._lo       = lo_alarm
+        self._decimals = decimals
+        self._value    = 0.0
 
-    def __init__(self, min_val=0.0, max_val=100.0, unit="",
-                 warn=None, crit=None, parent=None):
-        super().__init__(parent)
-        self._min    = min_val
-        self._max    = max_val
-        self._unit   = unit
-        self._warn   = warn
-        self._crit   = crit
-        self._value  = min_val
-        self._filled = 0.0
-        self._label  = "—"
-        self.setMinimumSize(120, 120)
+        self.setMinimumHeight(52)
 
-        self._anim = QPropertyAnimation(self, b"arc_fill", self)
-        self._anim.setDuration(600)
-        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(2)
 
-    @pyqtProperty(float)
-    def arc_fill(self) -> float:
-        return self._filled
+        # Top row — label + value
+        top = QHBoxLayout()
+        self._lbl = QLabel(label.upper())
+        self._lbl.setStyleSheet(theme.STYLE_DIM)
+        top.addWidget(self._lbl)
+        top.addStretch()
+        self._val_lbl = QLabel("—")
+        self._val_lbl.setStyleSheet(theme.STYLE_TEXT)
+        top.addWidget(self._val_lbl)
+        self._unit_lbl = QLabel(unit)
+        self._unit_lbl.setStyleSheet(theme.STYLE_DIM)
+        top.addWidget(self._unit_lbl)
+        layout.addLayout(top)
 
-    @arc_fill.setter
-    def arc_fill(self, val: float):
-        self._filled = max(0.0, min(1.0, val))
-        self.update()
+        # Bar canvas
+        self._bar = _GaugeBar(min_val, max_val, hi_alarm, lo_alarm)
+        self._bar.setFixedHeight(16)
+        layout.addWidget(self._bar)
 
     def set_value(self, value: float):
-        self._value  = value
-        self._label  = f"{value:.1f}"
-        frac = (value - self._min) / max(1e-9, self._max - self._min)
-        self._anim.stop()
-        self._anim.setStartValue(self._filled)
-        self._anim.setEndValue(max(0.0, min(1.0, frac)))
-        self._anim.start()
+        self._value = value
+        self._bar.set_value(value)
 
-    def _arc_color(self) -> QColor:
-        if self._crit is not None and self._value >= self._crit:
-            return QColor("#ff3333")
-        if self._warn is not None and self._value >= self._warn:
-            return QColor("#ffcc00")
-        return QColor("#00d4ff")
+        text = f"{value:.{self._decimals}f}"
+        color = theme.TEXT
+
+        if self._hi is not None and value >= self._hi:
+            color = theme.RED
+        elif self._lo is not None and value <= self._lo:
+            color = theme.AMBER
+
+        self._val_lbl.setText(text)
+        self._val_lbl.setStyleSheet(
+            f"color: {color}; font-family: 'Courier New', monospace; "
+            f"font-size: 12px; background: transparent;"
+        )
+
+
+class _GaugeBar(QWidget):
+
+    def __init__(self, min_val, max_val, hi_alarm, lo_alarm):
+        super().__init__()
+        self._min   = min_val
+        self._max   = max_val
+        self._hi    = hi_alarm
+        self._lo    = lo_alarm
+        self._value = 0.0
+
+    def set_value(self, v: float):
+        self._value = v
+        self.update()
 
     def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p   = QPainter(self)
+        w   = self.width()
+        h   = self.height()
+        rng = self._max - self._min or 1.0
 
-        w, h   = self.width(), self.height()
-        size   = min(w, h) - 16
-        rect   = QRectF((w - size) / 2, (h - size) / 2, size, size)
-        cx, cy = w / 2, h / 2
+        # Background
+        p.fillRect(0, 0, w, h, QColor(theme.BORDER))
 
-        pen = QPen(QColor("#0d2030"), 8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
-        p.setPen(pen)
-        p.drawArc(rect, int(self.START_ANGLE * 16), int(-self.SPAN_ANGLE * 16))
+        # Fill ratio
+        ratio = max(0.0, min(1.0, (self._value - self._min) / rng))
+        fill  = int(ratio * w)
 
-        if self._filled > 0:
-            pen.setColor(self._arc_color())
-            p.setPen(pen)
-            p.drawArc(rect, int(self.START_ANGLE * 16), int(-self._filled * self.SPAN_ANGLE * 16))
+        # Colour
+        if self._hi is not None and self._value >= self._hi:
+            color = QColor(theme.RED)
+        elif self._lo is not None and self._value <= self._lo:
+            color = QColor(theme.AMBER)
+        else:
+            color = QColor(theme.ACCENT)
 
-        p.setPen(QColor("#00d4ff"))
-        font = QFont("Courier New", 11, QFont.Weight.Bold)
-        p.setFont(font)
-        p.drawText(int(cx - 40), int(cy - 8), 80, 20, Qt.AlignmentFlag.AlignCenter, self._label)
+        p.fillRect(0, 0, fill, h, color)
 
-        p.setPen(QColor("#2a5a6a"))
-        font2 = QFont("Courier New", 8)
-        p.setFont(font2)
-        p.drawText(int(cx - 30), int(cy + 10), 60, 16, Qt.AlignmentFlag.AlignCenter, self._unit)
+        # Alarm markers
+        p.setPen(QPen(QColor(theme.RED), 1))
+        if self._hi is not None:
+            x = int(((self._hi - self._min) / rng) * w)
+            p.drawLine(x, 0, x, h)
+
+        p.setPen(QPen(QColor(theme.AMBER), 1))
+        if self._lo is not None:
+            x = int(((self._lo - self._min) / rng) * w)
+            p.drawLine(x, 0, x, h)
 
         p.end()
