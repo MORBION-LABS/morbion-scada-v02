@@ -56,15 +56,19 @@ class SplashScreen(QWidget):
         root.setSpacing(0)
         root.setContentsMargins(60, 60, 60, 60)
 
-        # Hexagon logo
-        self._logo = QSvgWidget()
-        self._logo.load(QByteArray(theme.LOGO_SVG.encode()))
-        self._logo.setFixedSize(120, 120)
-        self._logo.setStyleSheet("background: transparent;")
+        # Logo — PNG from config, SVG fallback
+        from PyQt6.QtWidgets import QLabel as _QLabel
+        from PyQt6.QtCore    import Qt as _Qt
+
+        logo_px   = theme.load_logo_pixmap(self._config, size=140)
+        logo_lbl  = _QLabel()
+        logo_lbl.setPixmap(logo_px)
+        logo_lbl.setAlignment(_Qt.AlignmentFlag.AlignCenter)
+        logo_lbl.setStyleSheet("background: transparent;")
 
         logo_row = QHBoxLayout()
         logo_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        logo_row.addWidget(self._logo)
+        logo_row.addWidget(logo_lbl)
         root.addLayout(logo_row)
 
         root.addSpacing(24)
