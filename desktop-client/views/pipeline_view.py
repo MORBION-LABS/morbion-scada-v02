@@ -1,137 +1,256 @@
 """
-MORBION — Pipeline View
-Kenya Pipeline Company — Petroleum Transfer — Port 508
+pipeline_view.py — Pipeline detailed view
+MORBION SCADA v02
 """
 
-from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QGroupBox, QSplitter
-from PyQt6.QtCore    import Qt
-
-from views.base_view           import BaseView
-from widgets.value_label       import ValueLabel
-from widgets.sparkline_widget  import SparklineWidget
-from widgets.valve_bar         import ValveBar
-from widgets.status_badge      import StatusBadge
-from widgets.control_panel     import ControlPanel
-from theme import C_RED, C_GREEN
-
-
-_CONTROL_SPEC = {
-    "process": "pipeline",
-    "faults": [
-        {"name": "Inject DUTY FAULT",              "register": 14, "value": 1,    "danger": True},
-        {"name": "Inject OVERPRESSURE (56 bar)",   "register": 1,  "value": 5600, "danger": True},
-        {"name": "Inject FLOW DROP (50 m³/hr)",    "register": 2,  "value": 500,  "danger": True},
-        {"name": "Clear Fault Code",               "register": 14, "value": 0,    "danger": False},
-    ],
-    "writes": [
-        {"label": "Outlet Pressure (raw ×100)", "register": 1,  "min": 0, "max": 9999, "default": 4000},
-        {"label": "Flow Rate (raw ×10)",        "register": 2,  "min": 0, "max": 9999, "default": 4500},
-        {"label": "Duty Pump Running (0/1)",    "register": 5,  "min": 0, "max": 1,    "default": 1},
-        {"label": "Outlet Valve (raw ×10)",     "register": 9,  "min": 0, "max": 1000, "default": 850},
-        {"label": "Fault Code (0=clear)",       "register": 14, "min": 0, "max": 3,    "default": 0},
-    ],
-}
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QGroupBox, QScrollArea,
+)
+from PyQt6.QtCore import Qt
+import theme
+from views.base_view       import BaseProcessView
+from widgets.status_badge  import StatusBadge
+from widgets.gauge_widget  import GaugeWidget
+from widgets.valve_bar     import ValveBar
+from widgets.value_label   import ValueLabel
+from widgets.sparkline_widget import SparklineWidget
+from widgets.control_panel import (
+    RegisterWriteRow, FaultClearButton, ControlButton,
+)
+import threading
 
 
-class PipelineView(BaseView):
+class PipelineView(BaseProcessView):
 
-    def __init__(self, rest_client, parent=None):
-        super().__init__(rest_client, parent)
-        splitter = QSplitter(Qt.Orientation.Horizontal, self)
-        root = QHBoxLayout(self)
-        root.setContentsMargins(8, 8, 8, 8)
-        root.addWidget(splitter)
+    def __init__(self, rest, config):
+        self._rest   = rest
+        self._config = config
+        super().__init__()
 
-        left = QVBoxLayout()
-        left_w = QGroupBox()
-        left_w.setLayout(left)
+    def _build_data_panel(self) -> QWidget:
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("border: none;")
 
+        container = QWidget()
+        layout    = QVBoxLayout(container)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(12)
+
+        row = QHBoxLayout()
+        title = QLabel("PIPELINE")
+        title.setStyleSheet(theme.STYLE_HEADER)
+        row.addWidget(title)
+        row.addStretch()
         self._badge = StatusBadge()
-        left.addWidget(self._badge)
+        row.addWidget(self._badge)
+        layout.addLayout(row)
 
-        # Pressures & flow
-        pf_group = QGroupBox("PRESSURES & FLOW")
-        pf_layout = QVBoxLayout(pf_group)
-        self._v_inlet    = ValueLabel("Inlet Pressure",  "bar", warn_threshold=None, crit_threshold=None, high_is_bad=False)
-        self._v_outlet   = ValueLabel("Outlet Pressure", "bar", warn_threshold=50,   crit_threshold=55)
-        self._v_diff     = ValueLabel("Differential",    "bar")
-        self._v_flow     = ValueLabel("Flow Rate",       "m³/hr", warn_threshold=None, crit_threshold=None, high_is_bad=False)
-        self._v_velocity = ValueLabel("Flow Velocity",   "m/s")
-        self._spark_out  = SparklineWidget(color="#00ff88")
-        self._spark_flow = SparklineWidget(color="#ffcc00")
-        for w in (self._v_inlet, self._v_outlet, self._v_diff,
-                  self._spark_out, self._v_flow, self._v_velocity, self._spark_flow):
-            pf_layout.addWidget(w)
-        left.addWidget(pf_group)
+        loc = QLabel(
+            "Kenya Pipeline Co. — Petroleum Transfer  |  Port 508")
+        loc.setStyleSheet(theme.STYLE_DIM)
+        layout.addWidget(loc)
+
+        # Pressures + flow
+        press_box = QGroupBox("PRESSURES & FLOW")
+        press_layout = QVBoxLayout(press_box)
+        self._inlet_press  = GaugeWidget(
+            "Inlet Pressure", "bar", 0, 10, lo_alarm=1.0)
+        self._outlet_press = GaugeWidget(
+            "Outlet Pressure", "bar", 0, 60, hi_alarm=55, lo_alarm=30)
+        self._flow_rate    = GaugeWidget(
+            "Flow Rate", "m³/hr", 0, 600, lo_alarm=200)
+        self._flow_vel     = ValueLabel("Flow Velocity", "m/s")
+        press_layout.addWidget(self._inlet_press)
+        press_layout.addWidget(self._outlet_press)
+        press_layout.addWidget(self._flow_rate)
+        press_layout.addWidget(self._flow_vel)
+        layout.addWidget(press_box)
 
         # Duty pump
-        dp_group = QGroupBox("DUTY PUMP")
-        dp_layout = QVBoxLayout(dp_group)
-        self._duty_badge   = StatusBadge()
-        self._v_duty_speed = ValueLabel("Speed",   "RPM")
-        self._v_duty_curr  = ValueLabel("Current", "A")
-        self._v_duty_power = ValueLabel("Power",   "kW")
-        for w in (self._duty_badge, self._v_duty_speed, self._v_duty_curr, self._v_duty_power):
-            dp_layout.addWidget(w)
-        left.addWidget(dp_group)
+        duty_box = QGroupBox("DUTY PUMP")
+        duty_layout = QHBoxLayout(duty_box)
+        self._duty_running = ValueLabel("Status", "")
+        self._duty_speed   = ValueLabel("Speed", "RPM")
+        self._duty_current = ValueLabel("Current", "A")
+        self._duty_power   = ValueLabel("Power", "kW")
+        self._duty_diff    = ValueLabel("Differential", "bar")
+        duty_layout.addWidget(self._duty_running)
+        duty_layout.addWidget(self._duty_speed)
+        duty_layout.addWidget(self._duty_current)
+        duty_layout.addWidget(self._duty_power)
+        duty_layout.addWidget(self._duty_diff)
+        layout.addWidget(duty_box)
 
-        # Standby pump + valves + leak
-        sv_group = QGroupBox("STANDBY PUMP & VALVES")
-        sv_layout = QVBoxLayout(sv_group)
-        self._standby_badge   = StatusBadge()
-        self._v_standby_speed = ValueLabel("Standby Speed", "RPM")
-        self._vb_inlet        = ValveBar("Inlet Valve")
-        self._vb_outlet       = ValveBar("Outlet Valve")
-        self._v_leak          = ValueLabel("Leak Flag",  "")
-        self._v_fault         = ValueLabel("Fault",      "")
-        for w in (self._standby_badge, self._v_standby_speed,
-                  self._vb_inlet, self._vb_outlet, self._v_leak, self._v_fault):
-            sv_layout.addWidget(w)
-        left.addWidget(sv_group)
-        left.addStretch()
-        splitter.addWidget(left_w)
+        # Standby pump
+        standby_box = QGroupBox("STANDBY PUMP")
+        standby_layout = QHBoxLayout(standby_box)
+        self._standby_running = ValueLabel("Status", "")
+        self._standby_speed   = ValueLabel("Speed", "RPM")
+        standby_layout.addWidget(self._standby_running)
+        standby_layout.addWidget(self._standby_speed)
+        layout.addWidget(standby_box)
 
-        ctrl_group = QGroupBox("OPERATOR CONTROL")
-        ctrl_layout = QVBoxLayout(ctrl_group)
-        ctrl_layout.addWidget(ControlPanel(_CONTROL_SPEC, rest_client))
-        splitter.addWidget(ctrl_group)
-        splitter.setSizes([700, 300])
+        # Leak
+        leak_box = QGroupBox("LEAK DETECTION")
+        leak_layout = QHBoxLayout(leak_box)
+        self._leak_flag = ValueLabel("Leak Flag", "")
+        leak_layout.addWidget(self._leak_flag)
+        layout.addWidget(leak_box)
+
+        # Valves
+        valve_box = QGroupBox("VALVES")
+        valve_layout = QVBoxLayout(valve_box)
+        self._inlet_valve  = ValveBar("Inlet Valve")
+        self._outlet_valve = ValveBar("Outlet Valve")
+        valve_layout.addWidget(self._inlet_valve)
+        valve_layout.addWidget(self._outlet_valve)
+        layout.addWidget(valve_box)
+
+        # Sparklines
+        spark_box = QGroupBox("TRENDS")
+        spark_layout = QVBoxLayout(spark_box)
+        self._spark_outlet = SparklineWidget(
+            "Outlet Pressure", "bar", hi_alarm=55, lo_alarm=30)
+        self._spark_flow   = SparklineWidget(
+            "Flow Rate", "m³/hr", lo_alarm=200)
+        spark_layout.addWidget(self._spark_outlet)
+        spark_layout.addWidget(self._spark_flow)
+        layout.addWidget(spark_box)
+
+        layout.addStretch()
+        scroll.setWidget(container)
+        return scroll
+
+    def _build_control_panel(self) -> QWidget:
+        panel  = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        title = QLabel("OPERATOR CONTROL")
+        title.setStyleSheet(theme.STYLE_ACCENT)
+        layout.addWidget(title)
+
+        # Duty pump
+        duty_box = QGroupBox("DUTY PUMP")
+        duty_layout = QVBoxLayout(duty_box)
+        start_btn = ControlButton("START DUTY",   theme.GREEN)
+        stop_btn  = ControlButton("STOP DUTY",    theme.RED)
+
+        def start_duty():
+            threading.Thread(
+                target=lambda: self._rest.write_register("pipeline", 5, 1),
+                daemon=True
+            ).start()
+
+        def stop_duty():
+            threading.Thread(
+                target=lambda: self._rest.write_register("pipeline", 5, 0),
+                daemon=True
+            ).start()
+
+        start_btn.clicked.connect(start_duty)
+        stop_btn.clicked.connect(stop_duty)
+        duty_layout.addWidget(start_btn)
+        duty_layout.addWidget(stop_btn)
+        duty_layout.addWidget(RegisterWriteRow(
+            "Speed (RPM)", self._rest,
+            "pipeline", 3, scale=1, hint="0-1480"))
+        layout.addWidget(duty_box)
+
+        # Standby pump
+        standby_box = QGroupBox("STANDBY PUMP")
+        standby_layout = QVBoxLayout(standby_box)
+        sb_start = ControlButton("START STANDBY", theme.GREEN)
+        sb_stop  = ControlButton("STOP STANDBY",  theme.RED)
+
+        def start_standby():
+            threading.Thread(
+                target=lambda: self._rest.write_register("pipeline", 7, 1),
+                daemon=True
+            ).start()
+
+        def stop_standby():
+            threading.Thread(
+                target=lambda: self._rest.write_register("pipeline", 7, 0),
+                daemon=True
+            ).start()
+
+        sb_start.clicked.connect(start_standby)
+        sb_stop.clicked.connect(stop_standby)
+        standby_layout.addWidget(sb_start)
+        standby_layout.addWidget(sb_stop)
+        layout.addWidget(standby_box)
+
+        # Valve + inject
+        writes_box = QGroupBox("REGISTER WRITES")
+        writes_layout = QVBoxLayout(writes_box)
+        writes_layout.addWidget(RegisterWriteRow(
+            "Outlet Valve (%)", self._rest,
+            "pipeline", 9, scale=10, hint="0-100"))
+        writes_layout.addWidget(RegisterWriteRow(
+            "Inject Outlet P (bar)", self._rest,
+            "pipeline", 1, scale=100, hint=">55 triggers overpressure"))
+        writes_layout.addWidget(RegisterWriteRow(
+            "Inject Leak Flag", self._rest,
+            "pipeline", 13, scale=1, hint="1=inject leak"))
+        layout.addWidget(writes_box)
+
+        # Fault
+        fault_box = QGroupBox("FAULT MANAGEMENT")
+        fault_layout = QVBoxLayout(fault_box)
+        fault_layout.addWidget(FaultClearButton(self._rest, "pipeline"))
+        layout.addWidget(fault_box)
+
+        layout.addStretch()
+        return panel
 
     def update_data(self, data: dict):
-        if not data.get("online"):
-            self._badge.set_offline()
-            self._duty_badge.set_offline()
-            self._standby_badge.set_offline()
+        if not data:
             return
 
-        self._badge.update_process(data)
+        online = data.get("online", False)
+        fault  = data.get("fault_code", 0)
 
-        self._v_inlet.set_value(data.get("inlet_pressure_bar"), 2)
-        self._v_outlet.set_value(data.get("outlet_pressure_bar"), 2)
-        self._v_diff.set_value(data.get("pump_differential_bar"), 2)
-        self._v_flow.set_value(data.get("flow_rate_m3hr"), 1)
-        self._v_velocity.set_value(data.get("flow_velocity_ms"), 2)
-        self._spark_out.push(data.get("outlet_pressure_bar", 0))
-        self._spark_flow.push(data.get("flow_rate_m3hr", 0))
-
-        if data.get("duty_pump_running"):
-            self._duty_badge.set_running()
+        if not online:
+            self._badge.set_offline()
+        elif fault > 0:
+            self._badge.set_fault(fault, data.get("fault_text", ""))
         else:
-            self._duty_badge.set_stopped()
-        self._v_duty_speed.set_value(data.get("duty_pump_speed_rpm"), 0)
-        self._v_duty_curr.set_value(data.get("duty_pump_current_A"), 1)
-        self._v_duty_power.set_value(data.get("duty_pump_power_kW"), 0)
+            self._badge.set_online()
 
-        if data.get("standby_pump_running"):
-            self._standby_badge.set_running()
-        else:
-            self._standby_badge.set_standby()
-        self._v_standby_speed.set_value(data.get("standby_pump_speed_rpm"), 0)
+        self._inlet_press.set_value(data.get("inlet_pressure_bar", 0))
+        self._outlet_press.set_value(data.get("outlet_pressure_bar", 0))
+        self._flow_rate.set_value(data.get("flow_rate_m3hr", 0))
+        self._flow_vel.set_value(data.get("flow_velocity_ms", 0))
 
-        self._vb_inlet.set_value(data.get("inlet_valve_pos_pct", 0))
-        self._vb_outlet.set_value(data.get("outlet_valve_pos_pct", 0))
+        duty_run = data.get("duty_pump_running", False)
+        self._duty_running.set_value(
+            "RUNNING" if duty_run else "STOPPED",
+            override_color=theme.GREEN if duty_run else theme.TEXT_DIM,
+        )
+        self._duty_speed.set_value(data.get("duty_pump_speed_rpm", 0))
+        self._duty_current.set_value(data.get("duty_pump_current_A", 0))
+        self._duty_power.set_value(data.get("duty_pump_power_kW", 0))
+        self._duty_diff.set_value(data.get("pump_differential_bar", 0))
+
+        standby_run = data.get("standby_pump_running", False)
+        self._standby_running.set_value(
+            "RUNNING" if standby_run else "STANDBY",
+            override_color=theme.AMBER if standby_run else theme.TEXT_DIM,
+        )
+        self._standby_speed.set_value(data.get("standby_pump_speed_rpm", 0))
 
         leak = data.get("leak_flag", False)
-        self._v_leak.set_value("⚠ SUSPECTED" if leak else "● CLEAR")
+        self._leak_flag.set_value(
+            "⚠ LEAK SUSPECTED" if leak else "OK",
+            override_color=theme.RED if leak else theme.GREEN,
+        )
 
-        self._v_fault.set_value(f"{data.get('fault_code',0)} — {data.get('fault_text','OK')}")
+        self._inlet_valve.set_position(data.get("inlet_valve_pos_pct", 0))
+        self._outlet_valve.set_position(data.get("outlet_valve_pos_pct", 0))
+
+        self._spark_outlet.push(data.get("outlet_pressure_bar", 0))
+        self._spark_flow.push(data.get("flow_rate_m3hr", 0))
