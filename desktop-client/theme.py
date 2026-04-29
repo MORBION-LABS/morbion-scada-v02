@@ -224,7 +224,8 @@ STYLE_AMBER   = label_style(AMBER,    12)
 STYLE_TEXT    = label_style(TEXT,     12)
 STYLE_HEADER  = label_style(ACCENT,   14, bold=True)
 
-# ── Logo SVG — hexagon with M ─────────────────────────────────────────────────
+# ── Logo SVG fallback — used only if PNG not found ────────────────────────────
+# The real logo is MORBION__.png — loaded at runtime by load_logo_pixmap()
 LOGO_SVG = """<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
   <polygon points="50,5 93,27.5 93,72.5 50,95 7,72.5 7,27.5"
            fill="none" stroke="#00d4ff" stroke-width="3"/>
@@ -233,7 +234,6 @@ LOGO_SVG = """<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
         font-weight="bold" fill="#00d4ff">M</text>
 </svg>"""
 
-# ── Watermark SVG — faint hexagon for content area background ─────────────────
 WATERMARK_SVG = """<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
   <polygon points="100,10 186,55 186,145 100,190 14,145 14,55"
            fill="none" stroke="#00d4ff" stroke-width="2" opacity="0.08"/>
@@ -241,3 +241,40 @@ WATERMARK_SVG = """<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"
         font-family="Courier New, monospace" font-size="72"
         font-weight="bold" fill="#00d4ff" opacity="0.05">M</text>
 </svg>"""
+
+
+def load_logo_pixmap(config: dict, size: int = 120):
+    """
+    Load the MORBION PNG logo as a QPixmap.
+    Falls back to SVG rendering if PNG not found.
+    config["logo_path"] is relative to the directory containing main.py.
+    """
+    import os
+    from PyQt6.QtGui     import QPixmap
+    from PyQt6.QtCore    import Qt
+
+    base_dir   = os.path.dirname(os.path.abspath(__file__))
+    logo_file  = config.get("logo_path", "MORBION__.png")
+    logo_path  = os.path.join(base_dir, logo_file)
+
+    if os.path.exists(logo_path):
+        px = QPixmap(logo_path)
+        if not px.isNull():
+            return px.scaled(
+                size, size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+
+    # Fallback — render SVG to pixmap
+    from PyQt6.QtSvg     import QSvgRenderer
+    from PyQt6.QtGui     import QPainter
+    from PyQt6.QtCore    import QByteArray, QSize
+
+    renderer = QSvgRenderer(QByteArray(LOGO_SVG.encode()))
+    px       = QPixmap(QSize(size, size))
+    px.fill(Qt.GlobalColor.transparent)
+    painter  = QPainter(px)
+    renderer.render(painter)
+    painter.end()
+    return px
