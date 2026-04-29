@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
-from views.base_view      import BaseView
+from views.base_view      import BaseProcessView
 from widgets.value_label  import ValueLabel
 from widgets.tank_widget  import TankWidget
 from widgets.sparkline_widget import SparklineWidget
