@@ -1,52 +1,104 @@
-#!/usr/bin/env python3
 """
-desktop-client/installer.py - MORBION Desktop Client Installer
-Prompts for Server Host IP, updates config.json
+installer.py — MORBION SCADA Desktop Client Installer
+MORBION SCADA v02
+
+Interactive installer. Prompts for server IP and ports.
+Writes config.json. Run once before first launch.
 """
 
 import os
-import sys
 import json
 
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
-class DesktopInstaller:
-    def __init__(self):
-        self.base_path = os.path.dirname(os.path.abspath(__file__))
-        self.config_path = os.path.join(self.base_path, "config.json")
+DEFAULTS = {
+    "server_port": 5000,
+    "operator":    "OPERATOR",
+    "logo_path":   "MORBION__.png",
+}
 
-    def load_config(self) -> dict:
-        if not os.path.exists(self.config_path):
-            return {}
-        with open(self.config_path, "r") as f:
-            return json.load(f)
 
-    def save_config(self, data: dict) -> None:
-        with open(self.config_path, "w") as f:
-            json.dump(data, f, indent=2)
+def prompt(label: str, default=None, cast=str) -> str:
+    if default is not None:
+        raw = input(f"  {label} [{default}]: ").strip()
+        if not raw:
+            return default
+    else:
+        raw = ""
+        while not raw:
+            raw = input(f"  {label}: ").strip()
+    try:
+        return cast(raw)
+    except Exception:
+        return default
 
-    def run(self) -> None:
-        print("\n" + "=" * 50)
-        print("  MORBION Desktop Client Installer")
-        print("=" * 50)
 
-        # Get Server Host IP (where SCADA server runs)
-        server_host = input("Enter SCADA Server Host IP: ").strip()
-        if not server_host:
-            print("[-] Error: Server Host IP is required")
-            return
+def main():
+    print()
+    print("═" * 52)
+    print("  MORBION SCADA v02 — Desktop Client Installer")
+    print("═" * 52)
+    print()
 
-        # Load and update config
-        config = self.load_config()
-        if "server" not in config:
-            config["server"] = {}
-        config["server"]["host"] = server_host
-        self.save_config(config)
+    # Load existing config if present
+    existing = {}
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH) as f:
+                existing = json.load(f)
+            print("  Existing config found — press Enter to keep values.\n")
+        except Exception:
+            pass
 
-        print("\n[+] Installation complete!")
-        print(f"    Config file: {self.config_path}")
-        print(f"    Server Host: {server_host}")
+    server_host = prompt(
+        "SCADA Server IP",
+        default=existing.get("server_host") or None,
+    )
+
+    use_defaults = input(
+        "\n  Use default ports? (server=5000) [Y/n]: "
+    ).strip().lower()
+
+    if use_defaults in ("n", "no"):
+        server_port = prompt(
+            "Server port",
+            default=existing.get("server_port", DEFAULTS["server_port"]),
+            cast=int,
+        )
+    else:
+        server_port = DEFAULTS["server_port"]
+
+    operator = prompt(
+        "Operator name (for alarm acknowledgment)",
+        default=existing.get("operator", DEFAULTS["operator"]),
+    )
+
+    logo_path = prompt(
+        "Logo filename (must be in same directory as main.py)",
+        default=existing.get("logo_path", DEFAULTS["logo_path"]),
+    )
+
+    config = {
+        "server_host": server_host,
+        "server_port": server_port,
+        "operator":    operator,
+        "logo_path":   logo_path,
+    }
+
+    with open(CONFIG_PATH, "w") as f:
+        json.dump(config, f, indent=2)
+
+    print()
+    print("═" * 52)
+    print("  Configuration saved.")
+    print(f"  Server:   http://{server_host}:{server_port}")
+    print(f"  Operator: {operator}")
+    print(f"  Logo:     {logo_path}")
+    print()
+    print("  Run:  python main.py")
+    print("═" * 52)
+    print()
 
 
 if __name__ == "__main__":
-    installer = DesktopInstaller()
-    installer.run()
+    main()
