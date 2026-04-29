@@ -4,19 +4,23 @@ Nairobi Water — Municipal Pumping Station — Port 502
 """
 
 from PyQt6.QtWidgets import (
-    QHBoxLayout, QVBoxLayout, QGroupBox, QSplitter
+    QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QGroupBox, QScrollArea,
 )
 from PyQt6.QtCore import Qt
-
-from views.base_view      import BaseProcessView
-from widgets.value_label  import ValueLabel
-from widgets.tank_widget  import TankWidget
+import theme
+from views.base_view       import BaseProcessView
+from widgets.status_badge  import StatusBadge
+from widgets.gauge_widget  import GaugeWidget
+from widgets.tank_widget   import TankWidget
+from widgets.valve_bar     import ValveBar
+from widgets.value_label   import ValueLabel
 from widgets.sparkline_widget import SparklineWidget
-from widgets.valve_bar    import ValveBar
-from widgets.status_badge import StatusBadge
-from widgets.control_panel import ControlPanel
-from theme import C_ACCENT
-
+from widgets.control_panel import (
+    RegisterWriteRow, FaultClearButton, ControlButton,
+)
+import threading
+from PyQt6.QtCore import QTimer
 
 _CONTROL_SPEC = {
     "process": "pumping_station",
