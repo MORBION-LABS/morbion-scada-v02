@@ -11,206 +11,50 @@ KEY CHANGES FROM v01:
   - Header shows unacknowledged alarm count separately
   - Graceful degradation if server host not configured
 """
+"""
+main_window.py — MORBION SCADA Main Window
+MORBION SCADA v02
 
-import json
-import os
+Flex layout. No fixed heights on charts.
+Vertical splitter: content area | scripting engine.
+Scripting engine drag-resizable upward.
+"""
+
 import logging
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QTabWidget, QLabel, QStatusBar, QSizePolicy, QMessageBox
+    QLabel, QTabWidget, QSplitter, QSizePolicy,
 )
-from PyQt6.QtCore    import Qt, QTimer
-from PyQt6.QtGui     import (
-    QFont, QColor, QPalette, QPixmap, QPainter,
-    QLinearGradient
-)
+from PyQt6.QtCore    import Qt, QTimer, pyqtSlot
+from PyQt6.QtSvgWidgets import QSvgWidget
+from PyQt6.QtCore    import QByteArray
 
-from connection.ws_thread   import WSThread
-from connection.rest_client import RestClient
-from views.overview_view    import OverviewView
-from views.pumping_view     import PumpingView
-from views.hx_view          import HXView
-from views.boiler_view      import BoilerView
-from views.pipeline_view    import PipelineView
-from views.alarms_view      import AlarmsView
-from views.plc_view         import PLCView
-from views.trends_view      import TrendsView
-from widgets.command_line   import CommandLine
-from theme import (STYLESHEET, C_ACCENT, C_RED, C_GREEN,
-                   C_MUTED, C_TEXT2, C_YELLOW)
+import theme
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("main_window")
 
 
-class HeaderWidget(QWidget):
-    """Top bar: logo + brand + live stats."""
+class MainWindow(QMainWindow):
 
-    def __init__(self, config: dict, parent=None):
-        super().__init__(parent)
-        self.setFixedHeight(56)
-
-        logo_path = config.get("ui", {}).get("logo_path", "")
-        if logo_path and os.path.isfile(logo_path):
-            self._logo_pixmap = QPixmap(logo_path).scaledToHeight(
-                40, Qt.TransformationMode.SmoothTransformation)
-        else:
-            self._logo_pixmap = None
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 0, 16, 0)
-        layout.setSpacing(12)
-
-        # Logo or hex icon
-        if self._logo_pixmap:
-            logo_lbl = QLabel()
-            logo_lbl.setPixmap(self._logo_pixmap)
-            layout.addWidget(logo_lbl)
-        else:
-            hex_lbl = QLabel("⬡")
-            hex_lbl.setStyleSheet(
-                f"color:{C_ACCENT};font-size:28px;"
-                f"text-shadow: 0 0 12px {C_ACCENT};")
-            layout.addWidget(hex_lbl)
-
-        # Brand
-        brand_col = QVBoxLayout()
-        brand_col.setSpacing(0)
-        brand = QLabel("MORBION")
-        brand.setFont(QFont("Courier New", 14, QFont.Weight.Bold))
-        brand.setStyleSheet(
-            f"color:{C_ACCENT};letter-spacing:6px;"
-            f"text-shadow: 0 0 16px {C_ACCENT};")
-        sub = QLabel("SCADA v2.0  ·  INDUSTRIAL CONTROL SYSTEM")
-        sub.setStyleSheet(
-            f"color:{C_MUTED};font-size:8px;letter-spacing:3px;")
-        brand_col.addWidget(brand)
-        brand_col.addWidget(sub)
-        layout.addLayout(brand_col)
-        layout.addStretch()
-
-        # Live stats
-        stats = QHBoxLayout()
-        stats.setSpacing(24)
-
-        self._lbl_processes = self._stat("4/4 ONLINE")
-        self._lbl_alarms    = self._stat("0 ALARMS")
-        self._lbl_unacked   = self._stat("0 UNACKED")
-        self._lbl_poll      = self._stat("POLL #0")
-        self._lbl_time      = self._stat("--:--:-- UTC")
-
-        for w in (self._lbl_processes, self._lbl_alarms,
-                  self._lbl_unacked, self._lbl_poll, self._lbl_time):
-            stats.addWidget(w)
-
-        # Connection indicator
-        self._conn_dot = QLabel("●")
-        self._conn_dot.setStyleSheet(
-            f"color:{C_MUTED};font-size:14px;")
-        self._conn_lbl = QLabel("CONNECTING")
-        self._conn_lbl.setStyleSheet(
-            f"color:{C_MUTED};font-size:9px;letter-spacing:2px;")
-        stats.addWidget(self._conn_dot)
-        stats.addWidget(self._conn_lbl)
-        layout.addLayout(stats)
-
-    def _stat(self, text: str) -> QLabel:
-        lbl = QLabel(text)
-        lbl.setStyleSheet(
-            f"color:{C_TEXT2};font-size:9px;"
-            f"letter-spacing:2px;font-family:'Courier New';")
-        return lbl
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        grad = QLinearGradient(0, 0, self.width(), 0)
-        grad.setColorAt(0.0, QColor("#020c16"))
-        grad.setColorAt(1.0, QColor("#030f1a"))
-        p.fillRect(self.rect(), grad)
-        p.setPen(QColor("#0d2030"))
-        p.drawLine(0, self.height() - 1, self.width(), self.height() - 1)
-        p.end()
-        super().paintEvent(event)
-
-    def set_connected(self, connected: bool):
-        if connected:
-            self._conn_dot.setStyleSheet(
-                f"color:{C_GREEN};font-size:14px;")
-            self._conn_lbl.setText("LIVE")
-            self._conn_lbl.setStyleSheet(
-                f"color:{C_GREEN};font-size:9px;letter-spacing:2px;")
-        else:
-            self._conn_dot.setStyleSheet(
-                f"color:{C_RED};font-size:14px;")
-            self._conn_lbl.setText("RECONNECTING")
-            self._conn_lbl.setStyleSheet(
-                f"color:{C_RED};font-size:9px;letter-spacing:2px;")
-
-    def update_plant(self, plant: dict, unacked_count: int = 0):
-        online = sum(
-            1 for k in ("pumping_station", "heat_exchanger",
-                        "boiler", "pipeline")
-            if plant.get(k, {}).get("online"))
-        alarms  = plant.get("alarms", [])
-        n_crit  = sum(1 for a in alarms if a.get("sev") == "CRIT")
-        n_total = len(alarms)
-
-        self._lbl_processes.setText(f"{online}/4 ONLINE")
-        self._lbl_processes.setStyleSheet(
-            f"color:{'#00ff88' if online == 4 else '#ff3333' if online == 0 else '#ffcc00'};"
-            f"font-size:9px;letter-spacing:2px;font-family:'Courier New';")
-
-        alarm_color = (C_RED if n_crit > 0
-                       else C_YELLOW if n_total > 0
-                       else C_TEXT2)
-        self._lbl_alarms.setText(f"{n_total} ALARMS")
-        self._lbl_alarms.setStyleSheet(
-            f"color:{alarm_color};font-size:9px;"
-            f"letter-spacing:2px;font-family:'Courier New';")
-
-        unack_color = C_RED if unacked_count > 0 else C_TEXT2
-        self._lbl_unacked.setText(f"{unacked_count} UNACKED")
-        self._lbl_unacked.setStyleSheet(
-            f"color:{unack_color};font-size:9px;"
-            f"letter-spacing:2px;font-family:'Courier New';")
-
-        self._lbl_poll.setText(f"POLL #{plant.get('poll_count', 0)}")
-        ts = plant.get("server_time", "")
-        self._lbl_time.setText(
-            ts.split(" ")[1] if " " in ts else ts)
-
-
-class MorbionMainWindow(QMainWindow):
-
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, rest, ws_thread):
         super().__init__()
-        self._config       = config
-        self._plant        = {}
-        self._unacked      = 0
+        self._config    = config
+        self._rest      = rest
+        self._ws        = ws_thread
+        self._plant     = {}
+        self._alarms    = []
 
-        ui  = config.get("ui",     {})
-        srv = config.get("server", {})
+        self.setWindowTitle("MORBION SCADA v02")
+        self.setMinimumSize(1280, 720)
+        self.setStyleSheet(theme.QSS)
 
-        self.setWindowTitle(ui.get("window_title", "MORBION SCADA v2.0"))
-        self.resize(
-            ui.get("window_width",  1600),
-            ui.get("window_height", 950),
-        )
-        self.setStyleSheet(STYLESHEET)
+        self._build_ui()
+        self._wire_ws()
+        self._start_poll_timer()
 
-        # Background image
-        self._bg_pixmap  = None
-        self._bg_opacity = ui.get("background_opacity", 0.08)
-        bg_path = ui.get("background_image_path", "")
-        if bg_path and os.path.isfile(bg_path):
-            self._bg_pixmap = QPixmap(bg_path)
+    # ── UI ────────────────────────────────────────────────────────────────────
 
-        host = srv.get("host", "").strip()
-        port = srv.get("port", 5000)
-
-        # ── REST client ───────────────────────────────────────────────────────
-        self._rest = RestClient(host, port) if host else None
-
-        # ── Central widget ────────────────────────────────────────────────────
+    def _build_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
@@ -218,203 +62,229 @@ class MorbionMainWindow(QMainWindow):
         root.setSpacing(0)
 
         # Header
-        self._header = HeaderWidget(config)
-        root.addWidget(self._header)
+        root.addWidget(self._build_header())
 
-        # Tabs
-        self._tabs = QTabWidget()
-        self._tabs.setDocumentMode(True)
-        root.addWidget(self._tabs, 1)
+        # Main splitter — content top, scripting engine bottom
+        self._splitter = QSplitter(Qt.Orientation.Vertical)
+        self._splitter.setHandleWidth(4)
+        self._splitter.setStyleSheet(
+            f"QSplitter::handle {{ background: {theme.BORDER}; }}"
+            f"QSplitter::handle:hover {{ background: {theme.ACCENT}; }}"
+        )
 
-        # ── Views ─────────────────────────────────────────────────────────────
-        self._ov_view       = OverviewView(self._rest)
-        self._pump_view     = PumpingView(self._rest)
-        self._hx_view       = HXView(self._rest)
-        self._boiler_view   = BoilerView(self._rest)
-        self._pipeline_view = PipelineView(self._rest)
-        self._alarms_view   = AlarmsView(self._rest)
-        self._plc_view      = PLCView(self._rest)
-        self._trends_view   = TrendsView(self._rest)
+        # Tab area
+        self._tabs = self._build_tabs()
+        self._splitter.addWidget(self._tabs)
 
-        self._tabs.addTab(self._ov_view,       "OVERVIEW")
-        self._tabs.addTab(self._pump_view,     "PUMPING STATION")
-        self._tabs.addTab(self._hx_view,       "HEAT EXCHANGER")
-        self._tabs.addTab(self._boiler_view,   "BOILER")
-        self._tabs.addTab(self._pipeline_view, "PIPELINE")
-        self._tabs.addTab(self._alarms_view,   "ALARMS")
-        self._tabs.addTab(self._plc_view,      "PLC PROGRAMS")
-        self._tabs.addTab(self._trends_view,   "TRENDS")
+        # Scripting engine
+        from widgets.command_line import CommandLine
+        self._cmd = CommandLine(
+            rest     = self._rest,
+            config   = self._config,
+            get_plant= lambda: self._plant,
+        )
+        self._splitter.addWidget(self._cmd)
 
-        # ── Command line ──────────────────────────────────────────────────────
-        self._cmd = CommandLine()
-        self._cmd.command_entered.connect(self._on_command)
-        root.addWidget(self._cmd)
+        # Default split: 70% content, 30% scripting
+        self._splitter.setSizes([500, 220])
+        self._splitter.setCollapsible(0, False)
+        self._splitter.setCollapsible(1, False)
 
-        # Status bar
-        self._status = QStatusBar()
-        self._status.showMessage(
-            "MORBION SCADA v2.0  ·  Intelligence. Precision. Vigilance.")
-        self.setStatusBar(self._status)
+        root.addWidget(self._splitter)
 
-        # ── WebSocket thread ──────────────────────────────────────────────────
-        if host:
-            self._ws = WSThread(host=host, port=port, parent=self)
-            self._ws.plantDataReceived.connect(self._on_plant_data)
-            self._ws.connectionChanged.connect(self._on_connection)
-            self._ws.start()
+    def _build_header(self) -> QWidget:
+        bar = QWidget()
+        bar.setFixedHeight(48)
+        bar.setStyleSheet(
+            f"background-color: {theme.SURFACE}; "
+            f"border-bottom: 1px solid {theme.BORDER};"
+        )
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(12, 0, 12, 0)
+        layout.setSpacing(12)
+
+        # Logo
+        logo = QSvgWidget()
+        logo.load(QByteArray(theme.LOGO_SVG.encode()))
+        logo.setFixedSize(32, 32)
+        logo.setStyleSheet("background: transparent;")
+        layout.addWidget(logo)
+
+        # Name
+        name = QLabel("MORBION SCADA v02")
+        name.setStyleSheet(
+            f"color: {theme.ACCENT}; font-family: 'Courier New', monospace; "
+            f"font-size: 14px; font-weight: bold; letter-spacing: 2px; "
+            f"background: transparent;"
+        )
+        layout.addWidget(name)
+
+        layout.addStretch()
+
+        # Live indicator
+        self._live_dot = QLabel("●")
+        self._live_dot.setStyleSheet(
+            f"color: {theme.TEXT_DIM}; font-size: 14px; background: transparent;"
+        )
+        layout.addWidget(self._live_dot)
+
+        self._ws_label = QLabel("CONNECTING")
+        self._ws_label.setStyleSheet(theme.STYLE_DIM)
+        layout.addWidget(self._ws_label)
+
+        layout.addSpacing(16)
+
+        # Poll rate
+        self._poll_label = QLabel("POLL —")
+        self._poll_label.setStyleSheet(theme.STYLE_DIM)
+        layout.addWidget(self._poll_label)
+
+        layout.addSpacing(16)
+
+        # Alarm count
+        self._alarm_label = QLabel("ALARMS  0")
+        self._alarm_label.setStyleSheet(theme.STYLE_DIM)
+        layout.addWidget(self._alarm_label)
+
+        layout.addSpacing(16)
+
+        # Server time
+        self._time_label = QLabel("--:--:--")
+        self._time_label.setStyleSheet(theme.STYLE_DIM)
+        layout.addWidget(self._time_label)
+
+        return bar
+
+    def _build_tabs(self) -> QTabWidget:
+        tabs = QTabWidget()
+        tabs.setDocumentMode(True)
+
+        from views.overview_view  import OverviewView
+        from views.pumping_view   import PumpingView
+        from views.hx_view        import HXView
+        from views.boiler_view    import BoilerView
+        from views.pipeline_view  import PipelineView
+        from views.alarms_view    import AlarmsView
+        from views.plc_view       import PLCView
+        from views.trends_view    import TrendsView
+
+        self._view_overview  = OverviewView(self._rest)
+        self._view_pumping   = PumpingView(self._rest, self._config)
+        self._view_hx        = HXView(self._rest, self._config)
+        self._view_boiler    = BoilerView(self._rest, self._config)
+        self._view_pipeline  = PipelineView(self._rest, self._config)
+        self._view_alarms    = AlarmsView(self._rest, self._config)
+        self._view_plc       = PLCView(self._rest)
+        self._view_trends    = TrendsView()
+
+        tabs.addTab(self._view_overview,  "OVERVIEW")
+        tabs.addTab(self._view_pumping,   "PUMP STN")
+        tabs.addTab(self._view_hx,        "HEAT EXC")
+        tabs.addTab(self._view_boiler,    "BOILER")
+        tabs.addTab(self._view_pipeline,  "PIPELINE")
+        tabs.addTab(self._view_alarms,    "ALARMS")
+        tabs.addTab(self._view_plc,       "PLC PROG")
+        tabs.addTab(self._view_trends,    "TRENDS")
+
+        return tabs
+
+    # ── Data wiring ───────────────────────────────────────────────────────────
+
+    def _wire_ws(self):
+        # Reconnect WS on_data to our update slot
+        self._ws._on_data       = self._on_plant_data
+        self._ws._on_connect    = self._on_ws_connect
+        self._ws._on_disconnect = self._on_ws_disconnect
+
+        # Animate live dot
+        self._dot_timer = QTimer(self)
+        self._dot_timer.timeout.connect(self._blink_dot)
+        self._dot_timer.start(1000)
+        self._dot_on = True
+
+    def _start_poll_timer(self):
+        # Fallback REST poll if WS drops
+        self._poll_timer = QTimer(self)
+        self._poll_timer.timeout.connect(self._rest_poll)
+        self._poll_timer.start(2000)
+
+    @pyqtSlot()
+    def _rest_poll(self):
+        if self._ws.connected:
+            return
+        import threading
+        threading.Thread(target=self._fetch_rest, daemon=True).start()
+
+    def _fetch_rest(self):
+        data = self._rest.get_all()
+        if data:
+            QTimer.singleShot(0, lambda: self._on_plant_data(data))
+
+    def _on_plant_data(self, data: dict):
+        self._plant  = data
+        self._alarms = data.get("alarms", [])
+        self._update_header(data)
+        self._push_to_views(data)
+
+    def _on_ws_connect(self):
+        QTimer.singleShot(0, lambda: self._ws_label.setStyleSheet(theme.STYLE_GREEN))
+        QTimer.singleShot(0, lambda: self._ws_label.setText("LIVE"))
+
+    def _on_ws_disconnect(self):
+        QTimer.singleShot(0, lambda: self._ws_label.setStyleSheet(theme.STYLE_DIM))
+        QTimer.singleShot(0, lambda: self._ws_label.setText("RECONNECTING"))
+
+    def _update_header(self, data: dict):
+        # Server time
+        t = data.get("server_time", "")
+        if t and len(t) >= 19:
+            self._time_label.setText(t[11:19])
+
+        # Poll rate
+        ms = data.get("poll_rate_ms", 0)
+        self._poll_label.setText(f"POLL {ms:.0f}ms")
+
+        # Alarm count
+        crit  = sum(1 for a in self._alarms if a.get("sev") == "CRIT")
+        total = len(self._alarms)
+        if crit > 0:
+            self._alarm_label.setStyleSheet(theme.STYLE_RED)
+            self._alarm_label.setText(f"⚠ ALARMS  {total}  CRIT {crit}")
+        elif total > 0:
+            self._alarm_label.setStyleSheet(theme.STYLE_AMBER)
+            self._alarm_label.setText(f"⚠ ALARMS  {total}")
         else:
-            self._ws = None
-            self._status.showMessage(
-                "⚠ Server host not configured — run installer.py")
-            log.error("Server host not configured in config.json")
+            self._alarm_label.setStyleSheet(theme.STYLE_GREEN)
+            self._alarm_label.setText("ALARMS  OK")
 
-    # ── Plant data handler ────────────────────────────────────────────────────
+    def _push_to_views(self, data: dict):
+        ps  = data.get("pumping_station", {})
+        hx  = data.get("heat_exchanger",  {})
+        bl  = data.get("boiler",          {})
+        pl  = data.get("pipeline",        {})
+        alm = data.get("alarms",          [])
 
-    def _on_plant_data(self, plant: dict):
-        self._plant = plant
+        try: self._view_overview.update_data(data)
+        except Exception: pass
+        try: self._view_pumping.update_data(ps)
+        except Exception: pass
+        try: self._view_hx.update_data(hx)
+        except Exception: pass
+        try: self._view_boiler.update_data(bl)
+        except Exception: pass
+        try: self._view_pipeline.update_data(pl)
+        except Exception: pass
+        try: self._view_alarms.update_data(alm)
+        except Exception: pass
+        try: self._view_trends.update_data(data)
+        except Exception: pass
 
-        # Count unacknowledged alarms
-        alarms        = plant.get("alarms", [])
-        self._unacked = sum(1 for a in alarms if not a.get("acked", False))
-
-        self._header.update_plant(plant, self._unacked)
-
-        try:
-            self._ov_view.update_data(plant)
-            self._pump_view.update_data(
-                plant.get("pumping_station", {"online": False}))
-            self._hx_view.update_data(
-                plant.get("heat_exchanger",  {"online": False}))
-            self._boiler_view.update_data(
-                plant.get("boiler",          {"online": False}))
-            self._pipeline_view.update_data(
-                plant.get("pipeline",        {"online": False}))
-            self._alarms_view.update_data(plant)
-            self._trends_view.update_data(plant)
-        except Exception as e:
-            log.error("View update error: %s", e)
-
-        # Update alarms tab badge
-        n_total  = len(alarms)
-        unacked  = self._unacked
-        if unacked > 0:
-            tab_text = f"ALARMS ({unacked}⚠)"
-        elif n_total > 0:
-            tab_text = f"ALARMS ({n_total})"
+    def _blink_dot(self):
+        self._dot_on = not self._dot_on
+        if self._ws.connected:
+            color = theme.GREEN if self._dot_on else theme.TEXT_DIM
         else:
-            tab_text = "ALARMS"
-        self._tabs.setTabText(5, tab_text)
-
-    def _on_connection(self, connected: bool):
-        self._header.set_connected(connected)
-        if connected:
-            self._status.showMessage(
-                "● LIVE — Connected to MORBION SCADA Server")
-        else:
-            self._status.showMessage(
-                "⚠ RECONNECTING — Lost connection to server...")
-
-    # ── Command line handler ──────────────────────────────────────────────────
-
-    def _on_command(self, cmd: dict):
-        """
-        Execute parsed command from CommandLine widget.
-        Routes to correct handler based on command type.
-        """
-        cmd_type = cmd.get("type")
-
-        if cmd_type == "control":
-            # Modbus register write via REST
-            if self._rest is None:
-                self._cmd.print_result(
-                    {"ok": False, "error": "Not connected to server"})
-                return
-            self._rest.write_register(
-                process  = cmd["process"],
-                register = cmd["register"],
-                value    = cmd["value"],
-                callback = self._cmd.print_result,
-            )
-
-        elif cmd_type == "alarm_ack":
-            # Alarm acknowledgment via REST
-            if self._rest is None:
-                self._cmd.print_result(
-                    {"ok": False, "error": "Not connected to server"})
-                return
-            target = cmd.get("target", "all")
-            self._rest.ack_alarm(
-                alarm_id = target,
-                callback = self._cmd.print_result,
-            )
-
-        elif cmd_type == "plc":
-            # PLC command — switch to PLC tab and show info
-            self._tabs.setCurrentIndex(6)
-            action  = cmd.get("action", "")
-            process = cmd.get("process", "")
-            if action == "reload" and process and self._rest:
-                self._rest.plc_reload(process, self._cmd.print_result)
-            elif action == "status":
-                self._cmd.print_result(
-                    {"ok": True,
-                     "message": "PLC tab opened — select process to view status"})
-
-        elif cmd_type == "query":
-            field = cmd.get("field", "")
-            if field == "alarms":
-                alarms = self._plant.get("alarms", [])
-                if not alarms:
-                    self._cmd.print_result(
-                        {"ok": True, "message": "No active alarms"})
-                else:
-                    for a in alarms:
-                        ack = "✓" if a.get("acked") else "⚠"
-                        self._cmd.print_result({
-                            "ok": True,
-                            "message": (f"{ack} [{a.get('sev')}] "
-                                        f"{a.get('id')} — {a.get('desc')}")
-                        })
-            elif field == "status":
-                proc = cmd.get("process", "all")
-                if proc == "all":
-                    for key in ("pumping_station", "heat_exchanger",
-                                "boiler", "pipeline"):
-                        data   = self._plant.get(key, {})
-                        online = data.get("online", False)
-                        fault  = data.get("fault_code", 0)
-                        self._cmd.print_result({
-                            "ok": True,
-                            "message": (f"{key}: "
-                                        f"{'ONLINE' if online else 'OFFLINE'} "
-                                        f"fault={fault}")
-                        })
-
-        elif cmd_type == "system":
-            action = cmd.get("action", "")
-            if action == "connect":
-                self._cmd.print_result({
-                    "ok":     False,
-                    "error":  "Use installer.py to change server host"
-                })
-
-    # ── Paint and close ───────────────────────────────────────────────────────
-
-    def paintEvent(self, event):
-        if self._bg_pixmap:
-            p = QPainter(self)
-            p.setOpacity(self._bg_opacity)
-            scaled = self._bg_pixmap.scaled(
-                self.size(),
-                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            p.drawPixmap(0, 0, scaled)
-            p.end()
-        super().paintEvent(event)
-
-    def closeEvent(self, event):
-        if self._ws:
-            self._ws.stop()
-            self._ws.wait(3000)
-        super().closeEvent(event)
+            color = theme.AMBER if self._dot_on else theme.TEXT_DIM
+        self._live_dot.setStyleSheet(
+            f"color: {color}; font-size: 14px; background: transparent;"
+        )
