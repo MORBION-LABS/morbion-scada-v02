@@ -1,16 +1,6 @@
 """
 main.py — MORBION SCADA Desktop Client Entry Point
 MORBION SCADA v02
-
-KEY FIX FROM v01:
-  v01 had `host` referenced in load_config() default return
-  before it was defined. This caused NameError on missing config.
-  v02 uses empty string default and validates in MorbionMainWindow.
-"""
-
-"""
-main.py — MORBION SCADA Desktop Client Entry Point
-MORBION SCADA v02
 """
 
 import sys
@@ -19,7 +9,6 @@ import os
 import logging
 
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore    import Qt
 
 logging.basicConfig(
     level   = logging.INFO,
@@ -27,14 +16,15 @@ logging.basicConfig(
     datefmt = "%Y-%m-%d %H:%M:%S",
 )
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
 
 def load_config() -> dict:
     defaults = {
-        "server_host": "192.168.100.30",
+        "server_host": "",
         "server_port": 5000,
         "operator":    "OPERATOR",
+        "logo_path":   "MORBION__.png",
     }
     if not os.path.exists(CONFIG_PATH):
         return defaults
@@ -61,7 +51,9 @@ def main():
 
     config = load_config()
 
-    # Import here — after QApplication created
+    if not config.get("server_host"):
+        print("No server configured. Run: python installer.py")
+
     from splash import SplashScreen
     splash = SplashScreen(config, save_config)
     splash.show()
