@@ -58,7 +58,6 @@ def save_config(config: dict):
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("MORBION SCADA v02")
-    app.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps)
 
     config = load_config()
 
