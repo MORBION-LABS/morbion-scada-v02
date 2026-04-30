@@ -1,145 +1,185 @@
-"""
-MORBION — Pumping Station View
-Nairobi Water — Municipal Pumping Station — Port 502
-"""
-
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QGroupBox, QScrollArea,
 )
-from PyQt6.QtCore import Qt
-import theme
-from views.base_view       import BaseProcessView
-from widgets.status_badge  import StatusBadge
-from widgets.gauge_widget  import GaugeWidget
-from widgets.tank_widget   import TankWidget
-from widgets.valve_bar     import ValveBar
-from widgets.value_label   import ValueLabel
-from widgets.sparkline_widget import SparklineWidget
-from widgets.control_panel import (
-    RegisterWriteRow, FaultClearButton, ControlButton,
-)
+from PyQt6.QtCore import Qt, QTimer
 import threading
-from PyQt6.QtCore import QTimer
-
-_CONTROL_SPEC = {
-    "process": "pumping_station",
-    "label":   "PUMPING STATION — NAIROBI WATER",
-    "faults": [
-        {"name": "Inject HIGH LEVEL (92%)",  "register": 0,  "value": 920, "danger": True},
-        {"name": "Inject LOW LEVEL (8%)",    "register": 0,  "value": 80,  "danger": True},
-        {"name": "Stop Pump (force)",         "register": 7,  "value": 0,   "danger": True},
-        {"name": "Clear Fault Code",          "register": 14, "value": 0,   "danger": False},
-    ],
-    "writes": [
-        {"label": "Tank Level (raw ×10)",     "register": 0,  "min": 0, "max": 1000, "default": 500},
-        {"label": "Pump Running (0/1)",        "register": 7,  "min": 0, "max": 1,    "default": 1},
-        {"label": "Outlet Valve (raw ×10)",    "register": 9,  "min": 0, "max": 1000, "default": 850},
-        {"label": "Fault Code (0=clear)",      "register": 14, "min": 0, "max": 4,    "default": 0},
-    ],
-}
+import theme
+from views.base_view          import BaseProcessView
+from widgets.status_badge     import StatusBadge
+from widgets.gauge_widget     import GaugeWidget
+from widgets.tank_widget      import TankWidget
+from widgets.valve_bar        import ValveBar
+from widgets.value_label      import ValueLabel
+from widgets.sparkline_widget import SparklineWidget
+from widgets.control_panel    import RegisterWriteRow, FaultClearButton, ControlButton
 
 
-class PumpingView(BaseView):
+class PumpingView(BaseProcessView):
 
-    def __init__(self, rest_client, parent=None):
-        super().__init__(rest_client, parent)
+    def __init__(self, rest, config):
+        self._rest   = rest
+        self._config = config
+        super().__init__()
 
-        splitter = QSplitter(Qt.Orientation.Horizontal, self)
-        root = QHBoxLayout(self)
-        root.setContentsMargins(8, 8, 8, 8)
-        root.addWidget(splitter)
+    def _build_data_panel(self) -> QWidget:
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("border: none;")
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(12)
 
-        # ── LEFT: process display ─────────────────────────────────────────────
-        left = QSplitter(Qt.Orientation.Vertical)
+        row = QHBoxLayout()
+        title = QLabel("PUMPING STATION")
+        title.setStyleSheet(theme.STYLE_HEADER)
+        row.addWidget(title)
+        row.addStretch()
+        self._badge = StatusBadge()
+        row.addWidget(self._badge)
+        layout.addLayout(row)
 
-        # Tank + pump status row
-        top_row_w = QGroupBox()
-        top_row_w.setTitle("STORAGE TANK & PUMP")
-        top_layout = QHBoxLayout(top_row_w)
+        loc = QLabel("Nairobi Water — Municipal Pumping Station  |  Port 502")
+        loc.setStyleSheet(theme.STYLE_DIM)
+        layout.addWidget(loc)
 
-        self._tank = TankWidget(0, 100, warn_pct=80, crit_pct=90)
-        self._tank.setFixedWidth(80)
-        top_layout.addWidget(self._tank)
+        main_row = QHBoxLayout()
+        main_row.setSpacing(12)
 
-        tank_vals = QVBoxLayout()
-        self._badge       = StatusBadge()
-        self._pump_badge  = StatusBadge()
-        self._v_level     = ValueLabel("Tank Level",   "%",   warn_threshold=80, crit_threshold=90)
-        self._v_volume    = ValueLabel("Tank Volume",  "m³")
-        self._v_speed     = ValueLabel("Pump Speed",   "RPM")
-        self._v_flow      = ValueLabel("Pump Flow",    "m³/hr")
-        self._v_current   = ValueLabel("Pump Current", "A",   warn_threshold=12, crit_threshold=15)
-        self._v_power     = ValueLabel("Pump Power",   "kW")
-        self._v_starts    = ValueLabel("Starts Today", "")
-        self._spark_flow  = SparklineWidget(color="#00ff88")
+        tank_box = QGroupBox("STORAGE TANK")
+        tank_layout = QVBoxLayout(tank_box)
+        self._tank = TankWidget("TANK", hi_alarm=90, lo_alarm=10)
+        self._tank.setMinimumHeight(200)
+        tank_layout.addWidget(self._tank)
+        self._vol_lbl = QLabel("Volume: — m³")
+        self._vol_lbl.setStyleSheet(theme.STYLE_DIM)
+        self._vol_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        tank_layout.addWidget(self._vol_lbl)
+        main_row.addWidget(tank_box)
 
-        for w in (self._badge, self._pump_badge, self._v_level, self._v_volume,
-                  self._v_speed, self._v_flow, self._v_current,
-                  self._v_power, self._v_starts, self._spark_flow):
-            tank_vals.addWidget(w)
-        tank_vals.addStretch()
-        top_layout.addLayout(tank_vals)
-        left.addWidget(top_row_w)
+        pump_box = QGroupBox("PUMP")
+        pump_layout = QVBoxLayout(pump_box)
+        self._pump_running = ValueLabel("Status",            "")
+        self._pump_speed   = GaugeWidget("Speed",            "RPM",   0, 1500)
+        self._pump_flow    = GaugeWidget("Flow",             "m³/hr", 0, 150)
+        self._pump_press   = GaugeWidget("Discharge Pressure","bar",  0, 10, hi_alarm=8.0)
+        self._pump_current = ValueLabel("Current",           "A")
+        self._pump_power   = ValueLabel("Power",             "kW")
+        self._pump_starts  = ValueLabel("Starts Today",      "")
+        for w in [self._pump_running, self._pump_speed, self._pump_flow,
+                  self._pump_press, self._pump_current, self._pump_power,
+                  self._pump_starts]:
+            pump_layout.addWidget(w)
+        main_row.addWidget(pump_box)
+        layout.addLayout(main_row)
 
-        # Pressures + valves
-        pv_group = QGroupBox("PRESSURES & VALVES")
-        pv_layout = QVBoxLayout(pv_group)
-        self._v_pressure  = ValueLabel("Discharge P",  "bar",  warn_threshold=7, crit_threshold=8)
-        self._spark_press = SparklineWidget(color="#ffcc00")
-        self._vb_inlet    = ValveBar("Inlet Valve")
-        self._vb_outlet   = ValveBar("Outlet Valve")
-        self._v_demand    = ValueLabel("Demand Flow",  "m³/hr")
-        self._v_net       = ValueLabel("Net Flow",     "m³/hr")
-        self._v_fault     = ValueLabel("Fault Code",   "")
-        for w in (self._v_pressure, self._spark_press,
-                  self._vb_inlet, self._vb_outlet,
-                  self._v_demand, self._v_net, self._v_fault):
-            pv_layout.addWidget(w)
-        pv_layout.addStretch()
-        left.addWidget(pv_group)
-        splitter.addWidget(left)
+        valve_box = QGroupBox("VALVES")
+        valve_layout = QVBoxLayout(valve_box)
+        self._inlet_valve  = ValveBar("Inlet Valve")
+        self._outlet_valve = ValveBar("Outlet Valve")
+        valve_layout.addWidget(self._inlet_valve)
+        valve_layout.addWidget(self._outlet_valve)
+        layout.addWidget(valve_box)
 
-        # ── RIGHT: control panel ──────────────────────────────────────────────
-        ctrl_group = QGroupBox("OPERATOR CONTROL")
-        ctrl_layout = QVBoxLayout(ctrl_group)
-        ctrl_layout.addWidget(ControlPanel(_CONTROL_SPEC, rest_client))
-        splitter.addWidget(ctrl_group)
+        flow_box = QGroupBox("FLOW BALANCE")
+        flow_layout = QHBoxLayout(flow_box)
+        self._demand_flow = ValueLabel("Demand Flow", "m³/hr")
+        self._net_flow    = ValueLabel("Net Flow",    "m³/hr")
+        flow_layout.addWidget(self._demand_flow)
+        flow_layout.addWidget(self._net_flow)
+        layout.addWidget(flow_box)
 
-        splitter.setSizes([700, 300])
+        spark_box = QGroupBox("TREND — TANK LEVEL")
+        spark_layout = QVBoxLayout(spark_box)
+        self._spark_level = SparklineWidget("Tank Level", "%", hi_alarm=90, lo_alarm=10)
+        spark_layout.addWidget(self._spark_level)
+        layout.addWidget(spark_box)
+
+        layout.addStretch()
+        scroll.setWidget(container)
+        return scroll
+
+    def _build_control_panel(self) -> QWidget:
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        title = QLabel("OPERATOR CONTROL")
+        title.setStyleSheet(theme.STYLE_ACCENT)
+        layout.addWidget(title)
+
+        pump_box = QGroupBox("PUMP")
+        pump_layout = QVBoxLayout(pump_box)
+        start_btn = ControlButton("START PUMP", theme.GREEN)
+        stop_btn  = ControlButton("STOP PUMP",  theme.RED)
+        start_btn.clicked.connect(lambda: threading.Thread(
+            target=lambda: self._rest.write_register("pumping_station", 7, 1),
+            daemon=True).start())
+        stop_btn.clicked.connect(lambda: threading.Thread(
+            target=lambda: self._rest.write_register("pumping_station", 7, 0),
+            daemon=True).start())
+        pump_layout.addWidget(start_btn)
+        pump_layout.addWidget(stop_btn)
+        layout.addWidget(pump_box)
+
+        writes_box = QGroupBox("REGISTER WRITES")
+        writes_layout = QVBoxLayout(writes_box)
+        writes_layout.addWidget(RegisterWriteRow(
+            "Pump Speed (RPM)", self._rest, "pumping_station", 2, scale=1,   hint="0-1450"))
+        writes_layout.addWidget(RegisterWriteRow(
+            "Outlet Valve (%)", self._rest, "pumping_station", 9, scale=10,  hint="0-100"))
+        writes_layout.addWidget(RegisterWriteRow(
+            "Inject Level (%)", self._rest, "pumping_station", 0, scale=10,  hint="0-100"))
+        layout.addWidget(writes_box)
+
+        inlet_box = QGroupBox("INLET VALVE")
+        inlet_layout = QHBoxLayout(inlet_box)
+        open_btn  = ControlButton("OPEN",  theme.GREEN)
+        close_btn = ControlButton("CLOSE", theme.AMBER)
+        open_btn.clicked.connect(lambda: threading.Thread(
+            target=lambda: self._rest.write_register("pumping_station", 8, 510),
+            daemon=True).start())
+        close_btn.clicked.connect(lambda: threading.Thread(
+            target=lambda: self._rest.write_register("pumping_station", 8, 0),
+            daemon=True).start())
+        inlet_layout.addWidget(open_btn)
+        inlet_layout.addWidget(close_btn)
+        layout.addWidget(inlet_box)
+
+        fault_box = QGroupBox("FAULT MANAGEMENT")
+        fault_layout = QVBoxLayout(fault_box)
+        fault_layout.addWidget(FaultClearButton(self._rest, "pumping_station"))
+        layout.addWidget(fault_box)
+
+        layout.addStretch()
+        return panel
 
     def update_data(self, data: dict):
-        if not data.get("online"):
-            self._badge.set_offline()
-            self._pump_badge.set_offline()
+        if not data:
             return
+        online = data.get("online", False)
+        fault  = data.get("fault_code", 0)
+        if not online:    self._badge.set_offline()
+        elif fault > 0:   self._badge.set_fault(fault, data.get("fault_text", ""))
+        else:             self._badge.set_online()
 
-        self._badge.update_process(data)
+        self._tank.set_level(data.get("tank_level_pct", 0), data.get("tank_volume_m3", 0))
+        self._vol_lbl.setText(f"Volume: {data.get('tank_volume_m3', 0):.1f} m³")
 
         running = data.get("pump_running", False)
-        if running:
-            self._pump_badge.set_running()
-        else:
-            self._pump_badge.set_stopped()
-
-        lvl = data.get("tank_level_pct", 0)
-        self._tank.set_value(lvl, f"{lvl:.1f}%")
-
-        self._v_level.set_value(data.get("tank_level_pct"), 1)
-        self._v_volume.set_value(data.get("tank_volume_m3"), 1)
-        self._v_speed.set_value(data.get("pump_speed_rpm"), 0)
-        self._v_flow.set_value(data.get("pump_flow_m3hr"), 1)
-        self._v_current.set_value(data.get("pump_current_A"), 1)
-        self._v_power.set_value(data.get("pump_power_kW"), 1)
-        self._v_starts.set_value(data.get("pump_starts_today"), 0)
-        self._v_pressure.set_value(data.get("discharge_pressure_bar"), 2)
-        self._v_demand.set_value(data.get("demand_flow_m3hr"), 1)
-        self._v_net.set_value(data.get("net_flow_m3hr"), 1)
-        self._v_fault.set_value(
-            f"{data.get('fault_code',0)} — {data.get('fault_text','OK')}")
-
-        self._spark_flow.push(data.get("pump_flow_m3hr", 0))
-        self._spark_press.push(data.get("discharge_pressure_bar", 0))
-
-        self._vb_inlet.set_value(data.get("inlet_valve_pos_pct", 0))
-        self._vb_outlet.set_value(data.get("outlet_valve_pos_pct", 0))
+        self._pump_running.set_value(
+            "RUNNING" if running else "STOPPED",
+            override_color=theme.GREEN if running else theme.TEXT_DIM)
+        self._pump_speed.set_value(data.get("pump_speed_rpm",           0))
+        self._pump_flow.set_value(data.get("pump_flow_m3hr",            0))
+        self._pump_press.set_value(data.get("discharge_pressure_bar",   0))
+        self._pump_current.set_value(data.get("pump_current_A",         0))
+        self._pump_power.set_value(data.get("pump_power_kW",            0))
+        self._pump_starts.set_value(data.get("pump_starts_today",       0))
+        self._inlet_valve.set_position(data.get("inlet_valve_pos_pct",  0))
+        self._outlet_valve.set_position(data.get("outlet_valve_pos_pct",0))
+        self._demand_flow.set_value(data.get("demand_flow_m3hr",        0))
+        self._net_flow.set_value(data.get("net_flow_m3hr",              0))
+        self._spark_level.push(data.get("tank_level_pct",               0))
