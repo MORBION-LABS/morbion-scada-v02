@@ -7,7 +7,7 @@ import logging
 import os
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QWidget, QVBoxLayout, QVBoxLayout, QLabel,
     QPushButton, QLineEdit,
 )
 from PyQt6.QtCore import Qt, QTimer
@@ -74,7 +74,7 @@ class SplashScreen(QWidget):
                 f"background: transparent;"
             )
 
-        logo_row = QHBoxLayout()
+        logo_row = QVBoxLayout()
         logo_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
         logo_row.addWidget(logo_lbl)
         root.addLayout(logo_row)
@@ -135,7 +135,7 @@ class SplashScreen(QWidget):
         retry_layout.setContentsMargins(0, 0, 0, 0)
         retry_layout.setSpacing(12)
 
-        ip_row = QHBoxLayout()
+        ip_row = QVBoxLayout()
         ip_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         ip_label = QLabel("SERVER IP:PORT")
@@ -157,7 +157,7 @@ class SplashScreen(QWidget):
         ip_row.addWidget(self._ip_input)
         retry_layout.addLayout(ip_row)
 
-        btn_row = QHBoxLayout()
+        btn_row = QVBoxLayout()
         btn_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         retry_btn = QPushButton("CONNECT")

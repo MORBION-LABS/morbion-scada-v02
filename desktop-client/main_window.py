@@ -10,11 +10,6 @@ KEY CHANGES FROM v01:
   - TrendsView tab added
   - Header shows unacknowledged alarm count separately
   - Graceful degradation if server host not configured
-"""
-"""
-main_window.py — MORBION SCADA Main Window
-MORBION SCADA v02
-
 Flex layout. No fixed heights on charts.
 Vertical splitter: content area | scripting engine.
 Scripting engine drag-resizable upward.
@@ -195,6 +190,9 @@ class MainWindow(QMainWindow):
         self._ws._on_data       = self._on_plant_data
         self._ws._on_connect    = self._on_ws_connect
         self._ws._on_disconnect = self._on_ws_disconnect
+
+        if self._ws.connected:
+            self._on_ws_connect()
 
         # Animate live dot
         self._dot_timer = QTimer(self)

@@ -10,12 +10,12 @@ MORBION SCADA v02
 """
 
 # ── Colours ───────────────────────────────────────────────────────────────────
-BG          = "#0a0a0a"
-SURFACE     = "#111111"
-BORDER      = "#1a1a1a"
+BG          = "#02080a"
+SURFACE     = "#051014"
+BORDER      = "#0a2229"
 ACCENT      = "#00d4ff"
-TEXT        = "#e0e0e0"
-TEXT_DIM    = "#666666"
+TEXT        = "#d0e8f0"
+TEXT_DIM    = "#4a7a8c"
 GREEN       = "#00ff88"
 RED         = "#ff3333"
 AMBER       = "#ffaa00"
