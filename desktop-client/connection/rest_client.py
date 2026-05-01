@@ -1,11 +1,10 @@
 """
 rest_client.py — MORBION SCADA Desktop REST Client
-Surgical Rebuild v02 — Thread-Safe Logic
+Surgical Rebuild v04 — Full Feature Set
 """
 import json
 import logging
 import urllib.request
-import urllib.error
 from typing import Optional
 
 log = logging.getLogger("rest_client")
