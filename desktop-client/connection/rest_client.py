@@ -1,25 +1,6 @@
 """
 rest_client.py — MORBION SCADA Desktop REST Client
-MORBION SCADA v02
-
-KEY FIXES FROM v01:
-  - GC fix: ControlResult and ControlWorker held in _active_requests set
-    until callback fires. v01 let them be garbage collected immediately
-    after QThreadPool.start() which caused silent callback failures.
-  - PLC API calls added: plc_reload(), plc_get_program(), plc_upload()
-  - Alarm acknowledgment: ack_alarm()
-  - All callbacks fire on UI thread via Qt signal mechanism
-
-Architecture:
-  Every request creates a ControlResult (QObject with signal) and
-  a ControlWorker (QRunnable). The result is held in _active_requests
-  until the finished signal fires, then removed. This prevents GC
-  from destroying the QObject before the signal can be emitted.
-"""
-
-"""
-rest_client.py — MORBION SCADA REST Client
-MORBION SCADA v02
+MORBION SCADA v02 — REWRITTEN FOR ENCODING FIX
 """
 
 import json
@@ -29,7 +10,6 @@ import urllib.error
 from typing import Optional
 
 log = logging.getLogger("rest_client")
-
 
 class RestClient:
 
@@ -41,14 +21,16 @@ class RestClient:
         url = f"{self._base}{path}"
         try:
             with urllib.request.urlopen(url, timeout=self._timeout) as r:
-                return json.loads(r.read().decode())
+                # FIX: Explicitly decode as utf-8 to handle ST file special characters
+                raw_data = r.read().decode("utf-8")
+                return json.loads(raw_data)
         except Exception as e:
             log.warning("GET %s failed: %s", path, e)
             return None
 
     def _post(self, path: str, body: dict) -> Optional[dict]:
         url     = f"{self._base}{path}"
-        payload = json.dumps(body).encode()
+        payload = json.dumps(body).encode("utf-8")
         req     = urllib.request.Request(
             url,
             data    = payload,
@@ -57,10 +39,11 @@ class RestClient:
         )
         try:
             with urllib.request.urlopen(req, timeout=self._timeout) as r:
-                return json.loads(r.read().decode())
+                # FIX: Explicitly decode as utf-8
+                return json.loads(r.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             try:
-                return json.loads(e.read().decode())
+                return json.loads(e.read().decode("utf-8"))
             except Exception:
                 return {"ok": False, "error": str(e)}
         except Exception as e:
@@ -99,42 +82,30 @@ class RestClient:
     # ── Verify after write ────────────────────────────────────────────────────
 
     def read_register_value(self, process: str, register: int) -> Optional[int]:
-        """Read a single register's raw value from current process snapshot."""
         data = self.get_process(process)
         if not data:
             return None
-        # Map register index to field name for readback verification
+        
         reg_field_map = {
             "pumping_station": {
-                0: ("tank_level_pct",        10.0),
-                2: ("pump_speed_rpm",          1.0),
-                7: ("pump_running",            1.0),
-                8: ("inlet_valve_pos_pct",    10.0),
-                9: ("outlet_valve_pos_pct",   10.0),
-                14:("fault_code",              1.0),
+                0: ("tank_level_pct", 10.0), 2: ("pump_speed_rpm", 1.0),
+                7: ("pump_running", 1.0), 8: ("inlet_valve_pos_pct", 10.0),
+                9: ("outlet_valve_pos_pct", 10.0), 14:("fault_code", 1.0),
             },
             "heat_exchanger": {
-                12:("hot_pump_speed_rpm",      1.0),
-                13:("cold_pump_speed_rpm",     1.0),
-                14:("hot_valve_pos_pct",      10.0),
-                15:("cold_valve_pos_pct",     10.0),
-                16:("fault_code",              1.0),
+                12:("hot_pump_speed_rpm", 1.0), 13:("cold_pump_speed_rpm", 1.0),
+                14:("hot_valve_pos_pct", 10.0), 15:("cold_valve_pos_pct", 10.0),
+                16:("fault_code", 1.0),
             },
             "boiler": {
-                6: ("burner_state",            1.0),
-                7: ("fw_pump_speed_rpm",       1.0),
-                8: ("steam_valve_pos_pct",    10.0),
-                9: ("fw_valve_pos_pct",       10.0),
-                10:("blowdown_valve_pos_pct", 10.0),
-                14:("fault_code",              1.0),
+                6: ("burner_state", 1.0), 7: ("fw_pump_speed_rpm", 1.0),
+                8: ("steam_valve_pos_pct", 10.0), 9: ("fw_valve_pos_pct", 10.0),
+                10:("blowdown_valve_pos_pct", 10.0), 14:("fault_code", 1.0),
             },
             "pipeline": {
-                3: ("duty_pump_speed_rpm",     1.0),
-                5: ("duty_pump_running",       1.0),
-                7: ("standby_pump_running",    1.0),
-                8: ("inlet_valve_pos_pct",    10.0),
-                9: ("outlet_valve_pos_pct",   10.0),
-                14:("fault_code",              1.0),
+                3: ("duty_pump_speed_rpm", 1.0), 5: ("duty_pump_running", 1.0),
+                7: ("standby_pump_running", 1.0), 8: ("inlet_valve_pos_pct", 10.0),
+                9: ("outlet_valve_pos_pct", 10.0), 14:("fault_code", 1.0),
             },
         }
         mapping = reg_field_map.get(process, {})
@@ -160,11 +131,11 @@ class RestClient:
     # ── PLC API ───────────────────────────────────────────────────────────────
 
     def _get_slow(self, path: str) -> Optional[dict]:
-        """For PLC endpoints — longer timeout as proxy adds latency."""
+        """For PLC endpoints — longer timeout and explicit UTF-8."""
         url = f"{self._base}{path}"
         try:
             with urllib.request.urlopen(url, timeout=12.0) as r:
-                return json.loads(r.read().decode())
+                return json.loads(r.read().decode("utf-8"))
         except Exception as e:
             log.warning("GET %s failed: %s", path, e)
             return None
@@ -185,4 +156,3 @@ class RestClient:
     def plc_reload(self, process: str) -> dict:
         result = self._post(f"/plc/{process}/program/reload", {})
         return result or {"ok": False, "error": "No response"}
-
