@@ -23,10 +23,43 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore    import Qt, QTimer, pyqtSlot
 from PyQt6.QtSvgWidgets import QSvgWidget
 from PyQt6.QtCore    import QByteArray
+import os
+from PyQt6.QtGui import QPixmap, QPainter
 
 import theme
 
 log = logging.getLogger("main_window")
+
+class _WatermarkContainer(QWidget):
+    """
+    Wraps a child widget and paints the MORBION logo PNG
+    as a centred watermark at 6% opacity behind it.
+    The child fills the entire container area.
+    """
+    def __init__(self, child: QWidget, logo_px: QPixmap, parent=None):
+        super().__init__(parent)
+        self._child   = child
+        self._logo_px = logo_px
+        child.setParent(self)
+
+    def resizeEvent(self, event):
+        self._child.setGeometry(0, 0, event.size().width(), event.size().height())
+
+    def paintEvent(self, event):
+        if self._logo_px and not self._logo_px.isNull():
+            p = QPainter(self)
+            p.setOpacity(0.06)
+            w, h   = self.width(), self.height()
+            size   = int(min(w, h) * 0.52)
+            scaled = self._logo_px.scaled(
+                size, size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            x = (w - scaled.width())  // 2
+            y = (h - scaled.height()) // 2
+            p.drawPixmap(x, y, scaled)
+            p.end()
 
 
 class MainWindow(QMainWindow):
@@ -69,7 +102,7 @@ class MainWindow(QMainWindow):
 
         # Tab area
         self._tabs = self._build_tabs()
-        self._splitter.addWidget(self._tabs)
+        self._splitter.addWidget(self._build_tab_container(self._tabs))  # was: addWidget(self._tabs)
 
         # Scripting engine
         from widgets.command_line import CommandLine
@@ -82,10 +115,27 @@ class MainWindow(QMainWindow):
 
         # Default split: 70% content, 30% scripting
         self._splitter.setSizes([500, 220])
-        self._splitter.setCollapsible(0, False)
-        self._splitter.setCollapsible(1, False)
+        self._splitter.setStretchFactor(1, 3)
 
         root.addWidget(self._splitter)
+
+
+
+    def _load_logo_px(self) -> QPixmap:
+        logo_file = self._config.get("logo_path", "MORBION-LOGO.png")
+        logo_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), logo_file)
+        if os.path.exists(logo_path):
+            px = QPixmap(logo_path)
+            if not px.isNull():
+                return px
+        return QPixmap()   # null — watermark simply won't draw
+
+    def _build_tab_container(self, tabs: QWidget) -> QWidget:
+        self._logo_px  = self._load_logo_px()
+        container = _WatermarkContainer(tabs, self._logo_px)
+        return container
+
 
     def _build_header(self) -> QWidget:
         bar = QWidget()
@@ -98,11 +148,25 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(12, 0, 12, 0)
         layout.setSpacing(12)
 
-        # Logo
-        logo = QSvgWidget()
-        logo.load(QByteArray(theme.LOGO_SVG.encode()))
-        logo.setFixedSize(32, 32)
-        logo.setStyleSheet("background: transparent;")
+       # Logo — load PNG from config, fall back to SVG
+        import os
+        from PyQt6.QtGui import QPixmap
+        logo_file = self._config.get("logo_path", "MORBION-LOGO.png")
+        logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), logo_file)
+        if os.path.exists(logo_path):
+            px = QPixmap(logo_path).scaled(
+                32, 32,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation)
+            logo = QLabel()
+            logo.setPixmap(px)
+            logo.setFixedSize(32, 32)
+            logo.setStyleSheet("background: transparent;")
+        else:
+            logo = QSvgWidget()
+            logo.load(QByteArray(theme.LOGO_SVG.encode()))
+            logo.setFixedSize(32, 32)
+            logo.setStyleSheet("background: transparent;")
         layout.addWidget(logo)
 
         # Name

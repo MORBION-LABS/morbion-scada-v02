@@ -159,8 +159,24 @@ class RestClient:
 
     # ── PLC API ───────────────────────────────────────────────────────────────
 
+    def _get_slow(self, path: str) -> Optional[dict]:
+        """For PLC endpoints — longer timeout as proxy adds latency."""
+        url = f"{self._base}{path}"
+        try:
+            with urllib.request.urlopen(url, timeout=12.0) as r:
+                return json.loads(r.read().decode())
+        except Exception as e:
+            log.warning("GET %s failed: %s", path, e)
+            return None
+
     def plc_get_program(self, process: str) -> Optional[dict]:
-        return self._get(f"/plc/{process}/program")
+        return self._get_slow(f"/plc/{process}/program")
+
+    def plc_get_status(self, process: str) -> Optional[dict]:
+        return self._get_slow(f"/plc/{process}/status")
+
+    def plc_get_variables(self, process: str) -> Optional[dict]:
+        return self._get_slow(f"/plc/{process}/variables")
 
     def plc_upload_program(self, process: str, source: str) -> dict:
         result = self._post(f"/plc/{process}/program", {"source": source})
@@ -170,8 +186,3 @@ class RestClient:
         result = self._post(f"/plc/{process}/program/reload", {})
         return result or {"ok": False, "error": "No response"}
 
-    def plc_get_status(self, process: str) -> Optional[dict]:
-        return self._get(f"/plc/{process}/status")
-
-    def plc_get_variables(self, process: str) -> Optional[dict]:
-        return self._get(f"/plc/{process}/variables")

@@ -66,6 +66,14 @@ class PLCView(QWidget):
         ("pl", "pipeline",        "Pipeline"),
     ]
 
+    # Map process name to its ST file path relative to processes/ dir
+    _ST_PATHS = {
+        "pumping_station": "pumping_station/plc_program.st",
+        "heat_exchanger":  "heat_exchanger/plc_program.st",
+        "boiler":          "boiler/plc_program.st",
+        "pipeline":        "pipeline/plc_program.st",
+    }
+
     def __init__(self, rest):
         super().__init__()
         self._rest    = rest
@@ -81,9 +89,9 @@ class PLCView(QWidget):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setHandleWidth(2)
 
-        # Left panel
+        # Left panel — FIX: removed setFixedWidth(280), use setMinimumWidth instead
         left = QWidget()
-        left.setFixedWidth(280)
+        left.setMinimumWidth(220)
         left.setStyleSheet(
             f"background: {theme.SURFACE}; border-right: 1px solid {theme.BORDER};")
         left_layout = QVBoxLayout(left)
@@ -119,14 +127,14 @@ class PLCView(QWidget):
         inputs_lbl = QLabel("INPUTS")
         inputs_lbl.setStyleSheet(theme.STYLE_DIM)
         self._inputs_list = QListWidget()
-        self._inputs_list.setMaximumHeight(80)
+        # FIX: removed setMaximumHeight(80) — let it grow with window
         self._inputs_list.setStyleSheet(
             f"background: {theme.BG}; color: {theme.TEXT_DIM}; "
             f"border: none; font-family: 'Courier New', monospace; font-size: 10px;")
         outputs_lbl = QLabel("OUTPUTS")
         outputs_lbl.setStyleSheet(theme.STYLE_DIM)
         self._outputs_list = QListWidget()
-        self._outputs_list.setMaximumHeight(80)
+        # FIX: removed setMaximumHeight(80) — let it grow with window
         self._outputs_list.setStyleSheet(
             f"background: {theme.BG}; color: {theme.TEXT_DIM}; "
             f"border: none; font-family: 'Courier New', monospace; font-size: 10px;")
@@ -201,14 +209,50 @@ class PLCView(QWidget):
         threading.Thread(target=self._fetch_all, daemon=True).start()
 
     def _fetch_all(self):
-        result = self._rest.plc_get_status(self._process)
-        QTimer.singleShot(0, lambda: self._update_status(result))
-        prog = self._rest.plc_get_program(self._process)
+        proc = self._process          # snapshot — thread-safe local copy
+
+        prog = self._rest.plc_get_program(proc)
         if prog:
             source = prog.get("source", "")
-            QTimer.singleShot(0, lambda: self._editor.setPlainText(source))
-        var_result = self._rest.plc_get_variables(self._process)
-        QTimer.singleShot(0, lambda: self._update_vars(var_result))
+            status = prog.get("status", {})
+            QTimer.singleShot(0, lambda s=source: self._editor.setPlainText(s))
+            QTimer.singleShot(0, lambda st=status: self._update_status({"status": st}))
+        else:
+            QTimer.singleShot(0, lambda: self._update_status(None))
+
+        var_result = self._rest.plc_get_variables(proc)
+        QTimer.singleShot(0, lambda v=var_result: self._update_vars(v))
+        
+    
+    def _try_direct_file_read(self):
+        """
+        Fallback: read the .st file directly from disk.
+        Works when running client on the same machine as processes,
+        or when processes/ is mounted/accessible.
+        """
+        import os
+        # Try common locations relative to this file
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        candidates = [
+            os.path.join(base_dir, "..", "..", "processes",
+                         self._ST_PATHS.get(self._process, "")),
+            os.path.join(base_dir, "..", "processes",
+                         self._ST_PATHS.get(self._process, "")),
+        ]
+        for path in candidates:
+            path = os.path.normpath(path)
+            if os.path.exists(path):
+                try:
+                    with open(path, "r") as f:
+                        source = f.read()
+                    QTimer.singleShot(0, lambda s=source: self._editor.setPlainText(s))
+                    QTimer.singleShot(0, lambda: self._status_badge.set_custom(
+                        "● LOADED (disk)", theme.AMBER))
+                    QTimer.singleShot(0, lambda p=path: self._last_error_lbl.setText(
+                        f"Direct read: {os.path.basename(p)}"))
+                    return
+                except Exception as e:
+                    pass
 
     def _update_status(self, result):
         if not result:
