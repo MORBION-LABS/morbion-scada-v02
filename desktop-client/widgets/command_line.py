@@ -48,7 +48,7 @@ class CommandLine(QWidget):
         
         # Input at TOP
         inp_row = QHBoxLayout(); inp_row.setContentsMargins(0,0,0,2)
-        prompt = QLabel("command › "); prompt.setStyleSheet(f"color: {theme.ACCENT}; font-weight: bold;")
+        prompt = QLabel("morbion › "); prompt.setStyleSheet(f"color: {theme.ACCENT}; font-weight: bold;")
         self._in = QLineEdit()
         self._in.setStyleSheet(f"background: {theme.BG}; color: white; border: 1px solid {theme.BORDER}; padding: 4px;")
         self._in.returnPressed.connect(self._on_enter)
