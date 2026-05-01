@@ -1,40 +1,64 @@
-MORBION SCADA v02
-Intelligence. Precision. Vigilance.
-MORBION SCADA v02 is a full-stack Industrial Control System (ICS) simulation environment designed for educational labs, security research, and industrial software development. It features high-fidelity physics-based simulations, a centralized aggregation server, and a modern, professional-grade Desktop HMI.
-🏗 System Architecture
-The platform is built upon three independent layers:
-PROCESSES: Four high-fidelity industrial simulations (Pumping Station, Heat Exchanger, Steam Boiler, and Petroleum Pipeline) running as independent Modbus TCP servers with real-time IEC 61131-3 logic.
-SERVER: A robust middleware layer that polls field processes, evaluates alarms, maintains a historian, and provides a unified "Super-Proxy" REST and WebSocket API.
-DESKTOP CLIENT: A modern PyQt6 HMI with a side-by-side industrial scripting engine, live tag watchlist, and a full Structured Text (ST) PLC programming interface.
-🚀 Installation & Setup
-Option A: Full Repository Clone
-Ideal for users running the entire stack on a single machine or setting up a complete lab environment.
-code
-Bash
-# Clone the entire project
+# MORBION SCADA v02
+> **Intelligence. Precision. Vigilance.**
+
+MORBION SCADA v02 is a robust, full-stack Industrial Control System (ICS) simulation environment. It is designed to bridge the gap between theoretical physics-based modeling and practical SCADA/HMI implementation. The system provides an end-to-end data pipeline: from field-level Modbus TCP registers and Structured Text PLC logic to a centralized middleware aggregator and a modern, high-performance Desktop HMI.
+
+---
+
+## 🏗 System Architecture
+
+The platform is architected as a decoupled, modular ecosystem consisting of three primary tiers:
+
+### 1. The Processes (`processes/`)
+The "Field Layer." Four independent industrial stations running physics-based simulations. 
+*   **Protocol:** Modbus TCP (Data) & Threaded HTTP (PLC Management).
+*   **Logic:** IEC 61131-3 Structured Text (ST) runtimes.
+*   **Physics:** Real-time modeling of mass/energy balance, affinity laws, and thermodynamics.
+
+### 2. The SCADA Server (`server/`)
+The "Middleware Layer." A centralized hub that aggregates data and handles high-level logic.
+*   **Aggregator:** Continuous polling of field processes.
+*   **Super-Proxy:** Provides atomic JSON snapshots (Source + Status + Variables) for the HMI.
+*   **Streaming:** WebSocket interface for real-time telemetry.
+
+### 3. The Desktop Client (`desktop-client/`)
+The "Supervisory Layer." A professional PyQt6-based HMI.
+*   **Nomenclature:** Strictly full industrial naming (no abbreviations).
+*   **Scripting:** Built-in industrial terminal with a Live Tag Watchlist.
+*   **IDE:** Non-blocking PLC code editor with syntax highlighting and hot-reloading.
+
+---
+
+## 🚀 Cloning & Installation
+
+### Option A: Complete Stack (Standard)
+Recommended for laboratory environments where the entire system is hosted on one network or machine.
+```bash
+# Clone the full repository
 git clone https://github.com/MORBION-LABS/morbion-scada-v02.git
 cd morbion-scada-v02
-Option B: Modular Installation (Sparse Checkout)
-Ideal for deploying components to different machines (e.g., Client on a workstation, Server on a VM, Processes on a PLC controller).
+Option B: Modular Checkout (Advanced)
+Use this option if you are deploying specific components to dedicated hardware (e.g., deploying the HMI to an operator workstation).
 code
 Bash
-# Initialize sparse checkout
+# Initialize modular clone
 git clone --filter=blob:none --no-checkout https://github.com/MORBION-LABS/morbion-scada-v02.git
 cd morbion-scada-v02
 
-# Choose the component you need
+# Set your target component
 git sparse-checkout set <processes | server | desktop-client>
-git checkout
+git checkout main
 🛠 Deployment Sequence
-For system integrity, components should be initialized in this specific order:
-DEPLOY PROCESSES: Set up on the "Field" machine. Run the interactive installer.py to set local network parameters and start the manager.
-DEPLOY SERVER: Set up on the "Backend" machine. Run installer.py to point the aggregator to the Processes' IP address.
-DEPLOY CLIENT: Set up on the "Operator" machine. Run installer.py to point the HMI to the SCADA Server's IP address.
+To maintain data integrity and prevent proxy timeouts, initialize the system in the following order:
+Field Processes: Deploy to the PLC VM. Use the interactive installer.py to define local network IPs. Start via manager.py.
+SCADA Server: Deploy to the Backend VM. Use installer.py to point the server to the PLC VM's IP address. Start via main.py.
+Desktop HMI: Install on the workstation. Use installer.py to point the client to the SCADA Server's IP address. Start via main.py.
 🏥 Global Troubleshooting
-Symptom	Probable Cause	Action
-"UNKNOWN" Gauges	Data flow interruption.	Verify the SCADA Server is running and reachable via ping.
-PLC Tab is Blank	Communication Timeout.	Ensure processes/shared/plc_http.py is using the Threaded server fix.
-Terminal Crash	Thread Violation.	Ensure the client uses the Signal/Slot architecture for UI updates.
-Command Rejected	Naming Mismatch.	Use full process names (e.g., boiler) instead of abbreviations.
+Symptom	Probable Cause	Corrective Action
+HMI Gauges show "-"	Aggregator Downtime	Verify SCADA Server is running and reachable via ping.
+PLC Tab remains blank	Threading Deadlock	Ensure the PLC VM is running the ThreadingHTTPServer fix in shared/plc_http.py.
+Process fails to start	Socket Binding Error	Port is likely held by a zombie process. Run sudo pkill -9 python3.
+HMI closes on command	Memory Violation	Ensure the Desktop Client is using Signal/Slot architecture for thread-to-UI communication.
+Command Logic Error	Naming Ambiguity	Use full process names (e.g., pumping_station) instead of aliases (e.g., ps).
 ⚖ License
-Industrial Simulation Framework — Morbion Labs. Internal use and research only.
+MORBION Labs Industrial Framework. Proprietary Simulation Environment. Designed for research and educational purposes.
