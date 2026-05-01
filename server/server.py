@@ -1,6 +1,6 @@
 """
 server.py — MORBION SCADA Flask Server
-MORBION SCADA v02 — FULL RECOVERY
+Surgical Rebuild v05 — THE SUPER-PROXY
 """
 import json, threading, logging, urllib.request, urllib.error
 from datetime import datetime
@@ -35,40 +35,43 @@ def _update_alarm_history(alarms):
     with _history_lock:
         for a in alarms:
             if not any(x.get("id") == a.get("id") for x in _alarm_history[-50:]):
-                _alarm_history.append(dict(a))
+                _alarm_history.append(dict(a)); 
                 if len(_alarm_history) > _HISTORY_MAX: _alarm_history.pop(0)
 
 def _proxy(proc, end):
     port = _PLC_HTTP_PORTS.get(proc)
     if not port: return None, {"error": "Invalid proc"}, 404
     try:
-        with urllib.request.urlopen(f"http://{_plc_host}:{port}{end}", timeout=10) as r:
+        # 15s timeout to handle the Threaded server on the PLC
+        with urllib.request.urlopen(f"http://{_plc_host}:{port}{end}", timeout=15) as r:
             d = r.read().decode("utf-8")
             return (d if end == "/plc/program" else json.loads(d)), None, 200
     except Exception as e: return None, {"error": str(e)}, 500
 
 @app.route("/health")
-def health(): return jsonify({"server": "MORBION-v02-FIXED", "status": "online"})
+def health(): return jsonify({"server": "MORBION-v02-SUPERPROXY", "status": "online"})
 
 @app.route("/data")
 def data_all(): return jsonify(_state.snapshot())
 
 @app.route("/plc/<process>/program", methods=["GET"])
 def plc_get_program(process):
+    """THE SUPER-PROXY: Fetches Program, Status, and Variables in one atomic call."""
     src, err, code = _proxy(process, "/plc/program")
     if err: return jsonify(err), code
     stat, _, _ = _proxy(process, "/plc/status")
-    return jsonify({"process": process, "source": src, "status": stat or {"loaded":True}})
+    vars, _, _ = _proxy(process, "/plc/variables")
+    return jsonify({
+        "process": process,
+        "source": src,
+        "status": stat or {"loaded": True},
+        "variables": vars or {"variables": {"inputs":{}, "outputs":{}}}
+    })
 
 @app.route("/plc/<process>/status", methods=["GET"])
 def plc_get_status(process):
     stat, err, code = _proxy(process, "/plc/status")
     return jsonify(stat) if stat else jsonify(err), code
-
-@app.route("/plc/<process>/variables", methods=["GET"])
-def plc_variables(process):
-    data, err, code = _proxy(process, "/plc/variables")
-    return jsonify(data) if data else jsonify(err), code
 
 @app.route("/control", methods=["POST"])
 def control():
