@@ -1,64 +1,129 @@
+📜 MORBION SCADA v02 — Master Documentation
+code
+Markdown
 # MORBION SCADA v02
 > **Intelligence. Precision. Vigilance.**
 
-MORBION SCADA v02 is a robust, full-stack Industrial Control System (ICS) simulation environment. It is designed to bridge the gap between theoretical physics-based modeling and practical SCADA/HMI implementation. The system provides an end-to-end data pipeline: from field-level Modbus TCP registers and Structured Text PLC logic to a centralized middleware aggregator and a modern, high-performance Desktop HMI.
+MORBION SCADA v02 is a professional-grade, full-stack Industrial Control System (ICS) simulation environment. It models four high-fidelity industrial processes using real-world physics, IEC 61131-3 Structured Text (ST) logic, and a robust "Super-Proxy" server architecture.
 
 ---
 
 ## 🏗 System Architecture
 
-The platform is architected as a decoupled, modular ecosystem consisting of three primary tiers:
+The v02 ecosystem is decoupled into three distinct VMs/logical layers to simulate a production OT/IT environment:
 
-### 1. The Processes (`processes/`)
-The "Field Layer." Four independent industrial stations running physics-based simulations. 
-*   **Protocol:** Modbus TCP (Data) & Threaded HTTP (PLC Management).
-*   **Logic:** IEC 61131-3 Structured Text (ST) runtimes.
-*   **Physics:** Real-time modeling of mass/energy balance, affinity laws, and thermodynamics.
-
-### 2. The SCADA Server (`server/`)
-The "Middleware Layer." A centralized hub that aggregates data and handles high-level logic.
-*   **Aggregator:** Continuous polling of field processes.
-*   **Super-Proxy:** Provides atomic JSON snapshots (Source + Status + Variables) for the HMI.
-*   **Streaming:** WebSocket interface for real-time telemetry.
-
-### 3. The Desktop Client (`desktop-client/`)
-The "Supervisory Layer." A professional PyQt6-based HMI.
-*   **Nomenclature:** Strictly full industrial naming (no abbreviations).
-*   **Scripting:** Built-in industrial terminal with a Live Tag Watchlist.
-*   **IDE:** Non-blocking PLC code editor with syntax highlighting and hot-reloading.
-
----
-
-## 🚀 Cloning & Installation
-
-### Option A: Complete Stack (Standard)
-Recommended for laboratory environments where the entire system is hosted on one network or machine.
-```bash
-# Clone the full repository
-git clone https://github.com/MORBION-LABS/morbion-scada-v02.git
-cd morbion-scada-v02
-Option B: Modular Checkout (Advanced)
-Use this option if you are deploying specific components to dedicated hardware (e.g., deploying the HMI to an operator workstation).
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          MORBION ICS LAB NETWORK                            │
+│                                                                             │
+│   PLC VIRTUAL MACHINE (<PLC_IP>)                                            │
+│   ├── PUMPING STATION      :502 (Modbus) :5020 (HTTP API)                   │
+│   ├── HEAT EXCHANGER       :506 (Modbus) :5060 (HTTP API)                   │
+│   ├── STEAM BOILER         :507 (Modbus) :5070 (HTTP API)                   │
+│   └── PETROLEUM PIPELINE   :508 (Modbus) :5080 (HTTP API)                   │
+│                                  │                                          │
+│                                  ▼  Modbus TCP / Threaded HTTP              │
+│                                                                             │
+│   SCADA SERVER MACHINE (<SERVER_IP>)                                        │
+│   ├── MORBION SUPER-PROXY  :5000 (REST + WebSocket)                         │
+│   ├── INFLUXDB HISTORIAN   :8086                                            │
+│   └── MOSQUITTO MQTT       :1883                                            │
+│                                  │                                          │
+│                                  ▼  Signal/Slot WebSocket Stream            │
+│                                                                             │
+│   OPERATOR WORKSTATION (<CLIENT_IP>)                                        │
+│   └── MORBION DESKTOP HMI (Modern Scripting Engine + ST PLC Editor)         │
+└─────────────────────────────────────────────────────────────────────────────┘
+🚀 Installation Guide
+Option 1: Full Repository Clone (Total Stack)
+Recommended for local dev or single-machine lab setups.
 code
 Bash
-# Initialize modular clone
+git clone https://github.com/MORBION-LABS/morbion-scada-v02.git
+cd morbion-scada-v02
+Option 2: Modular Installation (Sparse Checkout)
+Deploy only the component required for a specific machine.
+Field Processes (PLC VM):
+code
+Bash
 git clone --filter=blob:none --no-checkout https://github.com/MORBION-LABS/morbion-scada-v02.git
 cd morbion-scada-v02
-
-# Set your target component
-git sparse-checkout set <processes | server | desktop-client>
+git sparse-checkout set processes
 git checkout main
-🛠 Deployment Sequence
-To maintain data integrity and prevent proxy timeouts, initialize the system in the following order:
-Field Processes: Deploy to the PLC VM. Use the interactive installer.py to define local network IPs. Start via manager.py.
-SCADA Server: Deploy to the Backend VM. Use installer.py to point the server to the PLC VM's IP address. Start via main.py.
-Desktop HMI: Install on the workstation. Use installer.py to point the client to the SCADA Server's IP address. Start via main.py.
-🏥 Global Troubleshooting
-Symptom	Probable Cause	Corrective Action
-HMI Gauges show "-"	Aggregator Downtime	Verify SCADA Server is running and reachable via ping.
-PLC Tab remains blank	Threading Deadlock	Ensure the PLC VM is running the ThreadingHTTPServer fix in shared/plc_http.py.
-Process fails to start	Socket Binding Error	Port is likely held by a zombie process. Run sudo pkill -9 python3.
-HMI closes on command	Memory Violation	Ensure the Desktop Client is using Signal/Slot architecture for thread-to-UI communication.
-Command Logic Error	Naming Ambiguity	Use full process names (e.g., pumping_station) instead of aliases (e.g., ps).
-⚖ License
-MORBION Labs Industrial Framework. Proprietary Simulation Environment. Designed for research and educational purposes.
+SCADA Server (Aggregation VM):
+code
+Bash
+git sparse-checkout set server
+git checkout main
+Desktop Client (HMI Workstation):
+code
+Bash
+git sparse-checkout set desktop-client
+git checkout main
+🛠 Component Setup
+1. Processes (Field Layer)
+The processes simulate industrial equipment and execute ST logic.
+Setup:
+code
+Bash
+cd processes
+pip install -r requirements.txt
+python3 installer.py  # Interactive: Set PLC and Server IPs
+Management:
+code
+Bash
+sudo python3 manager.py start    # Starts all 4 industrial processes
+python3 manager.py status        # Verify PIDs and Port health
+2. SCADA Server (Middleware Layer)
+The v02 Server uses a Super-Proxy model, aggregating Program Source, Status, and Variables into atomic JSON packages.
+Setup:
+code
+Bash
+cd server
+pip install -r requirements.txt
+python3 installer.py  # Point to the PLC VM IP
+Start:
+code
+Bash
+python3 main.py
+3. Desktop Client (Supervisory Layer)
+A modern grade HMI with a built-in Variable Watchlist and Crash-Proof Scripting Engine.
+Setup:
+code
+Bash
+cd desktop-client
+pip install -r requirements.txt
+python installer.py  # Point to the SCADA Server IP
+Start:
+code
+Bash
+python main.py
+🕹 Industrial Commands (Scripting Engine)
+The v02 engine enforces Full Industrial Nomenclature. Abbreviations are prohibited for safety.
+Command	Description
+read pumping_station	Returns full JSON state of the station.
+write boiler pressure 8.5	Writes 8.5 bar to Register 0 with 350ms verification.
+plc pipeline status	Checks the health of the ST runtime on the pipeline.
+plc boiler source	Fetches the live Structured Text code to the terminal.
+cls	Clears the scripting console.
+🏥 Troubleshooting
+1. HMI Gauges are Blank / "UNKNOWN"
+Cause: The SCADA Server is likely offline or misconfigured.
+Fix: Ensure server/config.json has the correct plc_host. Restart server/main.py.
+2. Processes fail to start (Port Error)
+Cause: Zombie processes from a previous crash holding ports 502-508.
+Fix: Run sudo pkill -9 python3 on the PLC VM, then run manager.py start.
+3. PLC Tab hangs on "Syncing..."
+Cause: The PLC process is using a single-threaded server.
+Fix: Verify processes/shared/plc_http.py is using ThreadingHTTPServer.
+4. Application closes instantly on command
+Cause: Threading memory violation (PyQt signal error).
+Fix: Ensure widgets/command_line.py uses print_signal.emit() rather than direct UI calls.
+🧪 Physics & Conservation Laws
+Every process maintains mathematical integrity. Violations are flagged by the SCADA Alarm Engine:
+Pumping Station: Flow In - Flow Out = ΔVolume.
+Heat Exchanger: Q_hot (brine energy) = Q_cold (water energy).
+Steam Boiler: Feedwater Mass = Steam Mass + Blowdown.
+Petroleum Pipeline: Pump Curve Expected Flow = Flow Meter Reading.
+MORBION Labs v02
+The Software meets the Physics.
