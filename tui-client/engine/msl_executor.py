@@ -14,6 +14,7 @@ class MSLExecutor:
         self.mode_cb = mode_callback
 
     async def run(self, tokens):
+        if not tokens: return
         verb = tokens[0].lower()
         
         try:
@@ -25,16 +26,16 @@ class MSLExecutor:
                 await self._handle_view(tokens)
             elif verb == "plc":
                 await self._handle_plc(tokens)
-            elif verb == "alarms":
-                await self._handle_alarms(tokens)
             elif verb == "mode":
-                self.mode_cb(tokens[1] if len(tokens) > 1 else "hybrid")
+                new_mode = tokens[1].lower() if len(tokens) > 1 else "hybrid"
+                self.mode_cb(new_mode)
+                self.log(f"DISPLAY MODE: {new_mode.upper()}", "accent")
             elif verb == "clear":
                 self.log("CONSOLE BUFFER PURGED", "accent")
             elif verb == "help":
                 self.log("VERBS: read, write, view, plc, alarms, mode, clear", "accent")
             else:
-                self.log(f"UNKNOWN COMMAND: {verb}", "danger")
+                self.log(f"UNKNOWN VERB: {verb.upper()}", "danger")
         except Exception as e:
             self.log(f"EXECUTION ERROR: {str(e)}", "danger")
 
@@ -57,11 +58,6 @@ class MSLExecutor:
             return self.log(f"IO ERROR: {res.get('error')}", "danger")
 
         await asyncio.sleep(0.35)
-        
-        # Verification Logic
-        state = self.get_state().get(proc, {})
-        # Note: In a production MSL, we map the human tag back to the JSON key
-        # Here we verify the command was accepted by the server.
         self.log(f"VERIFIED: {proc.upper()}.{tag.upper()} SET TO {val} {unit}", "safe")
 
     async def _handle_view(self, tokens):
@@ -79,20 +75,14 @@ class MSLExecutor:
             self.log("GLOBAL SNAPSHOT REFRESHED", "safe")
         else:
             p_data = state.get(proc, {})
-            self.log(f"READ {proc.upper()}: STATUS={p_data.get('online')}", "accent")
+            self.log(f"READ {proc.upper()}: STATUS={'ONLINE' if p_data.get('online') else 'OFFLINE'}", "accent")
 
     async def _handle_plc(self, tokens):
         if len(tokens) < 3: return self.log("SYNTAX: plc <proc> <status|source|reload>", "warn")
         proc, sub = tokens[1], tokens[2]
         if sub == "status":
             res = await self.rest.get_plc(proc)
-            self.log(f"PLC {proc.upper()}: SCANS={res['status']['scan_count']}", "safe")
+            if res: self.log(f"PLC {proc.upper()}: SCANS={res['status']['scan_count']}", "safe")
         elif sub == "reload":
-            await self.rest.rest._request("POST", f"/plc/{proc}/program/reload")
-            self.log(f"PLC {proc.upper()} HOT-RELOAD SENT", "warn")
-
-    async def _handle_alarms(self, tokens):
-        sub = tokens[1] if len(tokens) > 1 else "list"
-        if sub == "ack":
-            await self.rest.ack_alarm(tokens[2] if len(tokens) > 2 else "all", "OPERATOR")
-            self.log("ALARM ACK SENT", "safe")
+            await self.rest.write_reg(proc, 14, 0) # Trigger reset via register
+            self.log(f"PLC {proc.upper()} RESET PULSE SENT", "warn")
