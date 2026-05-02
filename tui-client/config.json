@@ -1,0 +1,8 @@
+{
+  "server_host": "",
+  "server_port": 5000,
+  "operator": "OPERATOR",
+  "poll_interval_s": 1.0,
+  "history_file": "~/.morbion_history",
+  "verify_timeout_ms": 300
+}
