@@ -1,211 +1,163 @@
 """
-main.py — MORBION SCADA TUI Main Entry Point
-MORBION SCADA v02
-
-Integrates all subsystems: Connection, Engine, Widgets, and Screens.
+main.py — Mythic TUI Workstation Entry Point
+MORBION SCADA v02 — REBOOT
 """
-
+import asyncio
 import json
 import os
-import asyncio
-import logging
-from typing import Dict, Any
+from datetime import datetime
 
-from textual.app import App, ComposeResult
-from textual.widgets import Header, Footer, Input, Static
-from textual.containers import Vertical
-from textual.binding import Binding
-from textual import work
+from prompt_toolkit.application import Application
+from prompt_toolkit.layout import Layout, HSplit, VSplit, Window, WindowAlign, ConditionalContainer
+from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.widgets import Frame, TextArea
+from prompt_toolkit.filters import Condition
 
-# ── Connections ──
+from rich.console import Console
+from rich.io import StringIO
+
+# Internal Imports
 from connection.rest_client import RestClient
 from connection.ws_client import WSClient
+from ui.styles import MYTHIC_THEME, ACCENT, DIM, SAFE, WARN, DANGER
+from ui.components import UIComponents
+from engine.msl_parser import MSLParser
+from engine.msl_executor import MSLExecutor
+from engine.completer import MSLCompleter
 
-# ── Engine ──
-from engine.parser import MSLParser, MSLParserError
-from engine.executor import MSLExecutor
-from engine.history import CommandHistory
+class MorbionTUI:
+    def __init__(self):
+        # 1. Load Config
+        with open("config.json") as f:
+            self.config = json.load(f)
 
-# ── Screens ──
-from screens.dashboard import DashboardScreen
-from screens.process import ProcessScreen
-from screens.alarms import AlarmsScreen
-from screens.plc import PLCScreen
-from screens.trends import TrendsScreen
-
-logging.basicConfig(level=logging.INFO, filename="tui_client.log")
-log = logging.getLogger("morbion_tui")
-
-class MorbionApp(App):
-    """
-    The main TUI Application.
-    """
-    TITLE = "MORBION SCADA v02"
-    SUB_TITLE = "Intelligence. Precision. Vigilance."
-    
-    CSS = """
-    MorbionApp {
-        background: #02080a;
-        color: #d0e8f0;
-        font-family: 'Courier New', 'Consolas', monospace;
-    }
-
-    #terminal-area {
-        height: 4;
-        dock: bottom;
-        background: #051014;
-        border-top: solid #00d4ff;
-        padding: 0 1;
-    }
-
-    #cmd-input {
-        background: #02080a;
-        border: none;
-        color: #00d4ff;
-    }
-
-    #status-line {
-        height: 1;
-        color: #4a7a8c;
-        margin-left: 1;
-    }
-    """
-
-    BINDINGS = [
-        Binding("f3", "switch_screen('alarms')", "Alarms", show=True),
-        Binding("f4", "switch_screen('plc')", "PLC", show=True),
-        Binding("f5", "switch_screen('trends')", "Trends", show=True),
-        Binding("f6", "switch_screen('dashboard')", "Dashboard", show=True),
-        Binding("f10", "quit", "Quit", show=True),
-        Binding("escape", "switch_screen('dashboard')", "Home", show=False),
-        Binding("up", "history_prev", "Prev Cmd", show=False),
-        Binding("down", "history_next", "Next Cmd", show=False),
-    ]
-
-    SCREENS = {
-        "dashboard": DashboardScreen(),
-        "alarms": AlarmsScreen(None, ""), # Initialized in on_mount
-        "plc": PLCScreen(None),           # Initialized in on_mount
-        "trends": TrendsScreen(),
-    }
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.config = self._load_config()
+        # 2. Connection & Engine
         self.rest = RestClient(self.config["server_host"], self.config["server_port"])
-        self.history = CommandHistory()
-        self.plant_state = {}
+        self.state = {}
+        self.cmd_log = []
+        self.current_view = "F1" # Overview
+        self.mode = "hybrid"     # hybrid | scripting
         
-        # Executor needs a way to get the latest state for verification
-        self.executor = MSLExecutor(self.rest, lambda: self.plant_state)
-
-    def _load_config(self) -> Dict[str, Any]:
-        path = os.path.join(os.path.dirname(__file__), "config.json")
-        try:
-            with open(path, "r") as f:
-                return json.load(f)
-        except Exception:
-            return {"server_host": "localhost", "server_port": 5000, "operator": "OPERATOR"}
-
-    def compose(self) -> ComposeResult:
-        yield Header()
-        with Vertical(id="terminal-area"):
-            yield Static("morbion › ", id="status-line")
-            yield Input(placeholder="Enter MSL command...", id="cmd-input")
-        yield Footer()
-
-    async def on_mount(self) -> None:
-        """Initialize communication and default screens."""
-        # Re-initialize screens that need connections
-        self.SCREENS["alarms"] = AlarmsScreen(self.rest, self.config["operator"])
-        self.SCREENS["plc"] = PLCScreen(self.rest)
+        # 3. Rich for Buffer Rendering
+        self.console = Console(file=StringIO(), force_terminal=True, theme=MYTHIC_THEME)
         
-        # Start WebSocket Telemetry
-        self.ws = WSClient(self.config["server_host"], self.config["server_port"], self.on_telemetry)
-        await self.ws.start()
+        # 4. MSL Executor
+        self.executor = MSLExecutor(self.rest, lambda: self.state, self.add_log)
+
+        # 5. UI Elements (Prompt Toolkit)
+        self.top_buffer = FormattedTextControl()
+        self.watch_buffer = FormattedTextControl()
+        self.log_buffer = FormattedTextControl()
+        self.input_field = TextArea(
+            height=1, prompt="morbion › ", multiline=False, 
+            completer=MSLCompleter(), accept_handler=self.on_input
+        )
+
+    def add_log(self, msg, style="white"):
+        """Add entry to the Scripting Command Log."""
+        ts = datetime.now().strftime("%H:%M:%S")
+        color = {"accent": ACCENT, "safe": SAFE, "warn": WARN, "danger": DANGER}.get(style, "white")
+        self.cmd_log.append(f"[dim]{ts}[/] [{color}]{msg}[/]")
+        if len(self.cmd_log) > 50: self.cmd_log.pop(0)
+        self.refresh_ui()
+
+    def on_input(self, buffer):
+        """Handle Enter key in terminal."""
+        cmd = buffer.text.strip()
+        if not cmd: return
         
-        # Default to dashboard
-        self.push_screen("dashboard")
+        # Parse and execute
+        tokens = MSLParser.parse(cmd)
+        if tokens:
+            asyncio.create_task(self.executor.run(tokens))
+        else:
+            self.add_log(f"SYNTAX ERROR: {cmd}", "danger")
 
-    async def on_telemetry(self, data: Dict[str, Any]):
-        """WebSocket Callback: Routes data to the active screen."""
-        self.plant_state = data
+    def refresh_ui(self):
+        """The Master Render Loop. Converts Rich -> ANSI -> PromptToolkit."""
+        # --- 1. Render Top Pane (The Monitor) ---
+        self.console.file = StringIO() # Reset buffer
         
-        # Update current screen if it supports update_data
-        if hasattr(self.screen, "update_data"):
-            self.screen.update_data(data)
+        header = UIComponents.create_status_header(self.state)
+        self.console.print(header)
 
-    async def action_switch_screen(self, screen_id: str) -> None:
-        """Navigate between main views."""
-        if self.screen.name != screen_id:
-            self.push_screen(screen_id)
+        if self.current_view == "F1":
+            # 4-Quadrant Overview
+            from rich.columns import Columns
+            quads = []
+            for p in ["pumping_station", "heat_exchanger", "boiler", "pipeline"]:
+                p_data = self.state.get(p, {"online": False})
+                quads.append(UIComponents.create_register_table(p, p_data))
+            self.console.print(Columns(quads, expand=True))
+        else:
+            # Single Process Deep-Dive
+            proc_map = {"F2": "pumping_station", "F3": "heat_exchanger", "F4": "boiler", "F5": "pipeline"}
+            p_key = proc_map.get(self.current_view, "pumping_station")
+            p_data = self.state.get(p_key, {"online": False})
+            self.console.print(UIComponents.create_register_table(p_key, p_data))
 
-    def action_history_prev(self):
-        """Navigate terminal history up."""
-        cmd = self.history.get_prev()
-        self.query_one("#cmd-input", Input).value = cmd
+        self.top_buffer.text = self.console.file.getvalue()
 
-    def action_history_next(self):
-        """Navigate terminal history down."""
-        cmd = self.history.get_next()
-        self.query_one("#cmd-input", Input).value = cmd
+        # --- 2. Render Watchlist ---
+        self.console.file = StringIO()
+        wl = self.state.get("alarms", [])
+        wl_text = "\n".join([f"[bold red]![/] {a['id']}: {a['sev']}" for a in wl[:10]])
+        self.console.print(Panel(wl_text or "[dim]NO ACTIVE ALARMS[/]", title="WATCHLIST", border_style=ACCENT))
+        self.watch_buffer.text = self.console.file.getvalue()
 
-    @work(exclusive=True)
-    async def handle_command(self, raw_input: str) -> None:
-        """Process MSL terminal input."""
-        input_widget = self.query_one("#cmd-input", Input)
-        status_widget = self.query_one("#status-line", Static)
-        
-        if not raw_input.strip():
-            return
+        # --- 3. Render Command Log ---
+        self.log_buffer.text = "\n".join(self.cmd_log)
 
-        input_widget.value = ""
-        self.history.append(raw_input)
+    async def run(self):
+        # Keybindings
+        kb = KeyBindings()
+        @kb.add("c-c")
+        def _(event): event.app.exit()
 
-        try:
-            # 1. Parse
-            parsed_cmd = MSLParser.parse(raw_input)
-            
-            # 2. Execute Internal TUI commands
-            if parsed_cmd["verb"] == "cls":
-                self.notify("Terminal Cleared")
-                return
-            
-            if parsed_cmd["verb"] == "read" and len(parsed_cmd["args"]) == 1:
-                target = parsed_cmd["args"][0]
-                if target in ["pumping_station", "heat_exchanger", "boiler", "pipeline"]:
-                    # Semantic: 'read process' switches to that process view
-                    labels = {
-                        "pumping_station": "Pumping Station",
-                        "heat_exchanger": "Heat Exchanger",
-                        "boiler": "Steam Boiler",
-                        "pipeline": "Petroleum Pipeline"
-                    }
-                    self.install_screen(ProcessScreen(target, labels[target]), name=f"proc-{target}")
-                    self.push_screen(f"proc-{target}")
-                    return
+        @kb.add("tab")
+        def _(event):
+            self.mode = "scripting" if self.mode == "hybrid" else "hybrid"
+            self.add_log(f"MODE SWAP: {self.mode.upper()}", "accent")
 
-            # 3. Execute MSL commands via Executor
-            result = await self.executor.execute(parsed_cmd)
-            
-            # 4. Feedback
-            status_widget.update(f"morbion › [dim]{raw_input}[/]")
-            self.notify(result, title="MSL EXEC", timeout=4)
+        @kb.add("f1")
+        @kb.add("f2")
+        @kb.add("f3")
+        @kb.add("f4")
+        @kb.add("f5")
+        def _(event):
+            self.current_view = event.key_sequence[0].key.name
+            self.add_log(f"VIEW SWAP: {self.current_view}", "accent")
 
-        except MSLParserError as e:
-            self.notify(str(e), title="SYNTAX ERROR", severity="error")
-        except Exception as e:
-            self.notify(f"System Error: {e}", severity="error")
+        # Define Layout
+        root = HSplit([
+            # Top Monitor (70% in Hybrid, 10% in Scripting)
+            Window(content=self.top_buffer, height=lambda: 18 if self.mode == "hybrid" else 3),
+            # Bottom Scripting Engine (Fixed Frame)
+            Frame(
+                VSplit([
+                    Window(content=self.watch_buffer, width=30), # Left Watchlist
+                    Window(content=self.log_buffer, padding=1),  # Right Log
+                ]),
+                title="[ COMMAND CENTER ]"
+            ),
+            # Command Line Input
+            self.input_field
+        ])
 
-    async def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Event triggered when Enter is pressed in the cmd-input."""
-        self.handle_command(event.value)
+        # Start WebSocket Background Task
+        self.ws = WSClient(self.config["server_host"], self.config["server_port"], self.ws_callback)
+        asyncio.create_task(self.ws.start())
 
-    async def on_unmount(self) -> None:
-        """Graceful shutdown."""
-        if hasattr(self, "ws"):
-            self.ws.stop()
+        # Build App
+        app = Application(layout=Layout(root), key_bindings=kb, full_screen=True, mouse_support=True)
+        await app.run_async()
+
+    def ws_callback(self, data):
+        """Called every 1.0s by WSClient."""
+        self.state = data
+        self.refresh_ui()
 
 if __name__ == "__main__":
-    app = MorbionApp()
-    app.run()
+    tui = MorbionTUI()
+    asyncio.run(tui.run())
