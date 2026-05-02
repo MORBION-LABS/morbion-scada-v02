@@ -1,5 +1,5 @@
 {
   "server_host": "",
-  "server_port": 5_000,
+  "server_port": 5000,
   "operator": "OPERATOR"
 }
