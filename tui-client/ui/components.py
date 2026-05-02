@@ -30,7 +30,6 @@ class UIComponents:
         table.add_column("TAG", style=DIM)
         table.add_column("VALUE", justify="right", style="bold white")
         
-        # Display ALL registers as per spec
         skip = ["online", "process", "label", "location", "port", "fault_text", "burner_text"]
         for k, v in data.items():
             if k in skip: continue
