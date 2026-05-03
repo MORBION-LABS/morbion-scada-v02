@@ -42,6 +42,7 @@ def load_config() -> dict:
 
 
 # ── Server probe ──────────────────────────────────────────────────────────────
+
 async def _probe_server(host: str, port: int) -> tuple:
     """
     Quick health check. Returns (online: bool, processes_online: int).
@@ -173,7 +174,7 @@ def _draw_menu(config: dict, online: bool, n_online: int) -> None:
         print("  [q]  Quit")
         print()
 
-# ── Mode launchers ────────────────────────────────────────────────────────────
+# ── Mode launchers ─────────────────────────────────────────────────────────────
 
 def _launch_cli(config: dict) -> None:
     """Launch CLI shell. Blocks until user exits."""
@@ -229,7 +230,7 @@ def _run_installer() -> dict:
     return load_config()
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# ── Main ────────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     """
@@ -248,7 +249,7 @@ def main() -> None:
 
         if host:
             try:
-                online, n_online = probe_server(host, int(port))
+                online, n_online = asyncio.run(_probe_server(host, int(port)))
             except Exception:
                 online, n_online = False, 0
         else:
