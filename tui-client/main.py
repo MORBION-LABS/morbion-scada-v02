@@ -42,30 +42,6 @@ def load_config() -> dict:
 
 
 # ── Server probe ──────────────────────────────────────────────────────────────
-
-async def _probe_server(host: str, port: int) -> tuple:
-    """
-    Quick health check. Returns (online: bool, processes_online: int).
-    Timeout 3s — menu must not hang.
-    """
-    if not host:
-        return False, 0
-    try:
-        from core.rest_client import RestClient
-        async with RestClient(host, port, timeout=3.0) as rest:
-            health = await rest.get_health()
-            if health is None:
-                return False, 0
-            n = health.get("processes_online", 0)
-            try:
-                n = int(n)
-            except (TypeError, ValueError):
-                n = 0
-            return True, n
-    except Exception:
-        return False, 0
-
-
 async def _probe_server(host: str, port: int) -> tuple:
     """
     Quick health check. Returns (online: bool, processes_online: int).
@@ -97,6 +73,7 @@ async def _probe_server(host: str, port: int) -> tuple:
             return True, n
     except Exception:
         return False, 0
+
 # ── Rich imports — degrade gracefully if not installed ────────────────────────
 
 try:
