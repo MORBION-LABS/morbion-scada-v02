@@ -66,14 +66,37 @@ async def _probe_server(host: str, port: int) -> tuple:
         return False, 0
 
 
-def probe_server(host: str, port: int) -> tuple:
-    """Synchronous wrapper around async probe."""
+async def _probe_server(host: str, port: int) -> tuple:
+    """
+    Quick health check. Returns (online: bool, processes_online: int).
+    Uses /data endpoint since /health may not include processes_online.
+    Timeout 3s — menu must not hang.
+    """
+    if not host:
+        return False, 0
     try:
-        return asyncio.run(_probe_server(host, port))
+        from core.rest_client import RestClient
+        async with RestClient(host, port, timeout=3.0) as rest:
+            # Try /health first
+            health = await rest.get_health()
+            if health is None:
+                return False, 0
+            # Count online processes from /data
+            data = await rest.get_data()
+            if data is None:
+                return True, 0
+            n = 0
+            for proc in (
+                "pumping_station",
+                "heat_exchanger",
+                "boiler",
+                "pipeline",
+            ):
+                if data.get(proc, {}).get("online"):
+                    n += 1
+            return True, n
     except Exception:
         return False, 0
-
-
 # ── Rich imports — degrade gracefully if not installed ────────────────────────
 
 try:
@@ -98,7 +121,7 @@ def _print(text: str, colour: str = "#d0e8f0") -> None:
 # ── Menu drawing ──────────────────────────────────────────────────────────────
 
 def _draw_menu(config: dict, online: bool, n_online: int) -> None:
-    """Draw the main menu to terminal."""
+    """Draw the main menu. Uses fixed-width padding safe on Windows."""
     host   = config.get("server_host") or "NOT CONFIGURED"
     port   = config.get("server_port", 5000)
     op     = config.get("operator", "OPERATOR")
@@ -107,116 +130,71 @@ def _draw_menu(config: dict, online: bool, n_online: int) -> None:
         status_str    = f"●ONLINE  {n_online}/4 processes"
         status_colour = "#00ff88"
     elif not config.get("server_host"):
-        status_str    = "○NOT CONFIGURED — run installer.py"
+        status_str    = "○NOT CONFIGURED"
         status_colour = "#ffaa00"
     else:
-        status_str    = "○OFFLINE — server unreachable"
+        status_str    = "○OFFLINE"
         status_colour = "#ff3333"
+
+    W = 48   # inner width between ║ and ║
+
+    def row(content: str = "") -> str:
+        """Pad content to exactly W chars between box walls."""
+        import re
+        
+        # FIX 1: Use negative lookbehind to ignore escaped brackets (like \\[1]) 
+        # when stripping markup tags so they aren't removed before counting.
+        plain = re.sub(r'(?<!\\)\[.*?\]', '', content)
+        
+        # Convert escaped brackets back to normal brackets for the final length count.
+        plain = plain.replace(r'\[', '[')
+        
+        pad   = W - len(plain)
+        pad   = max(0, pad)
+        return f"[#00d4ff]║[/#00d4ff]{content}{' ' * pad}[#00d4ff]║[/#00d4ff]"
+
+    def divider() -> str:
+        return f"[#00d4ff]╠{'═' * W}╣[/#00d4ff]"
 
     if _RICH and console:
         console.clear()
-        # Header
         console.print()
-        console.print(
-            "[#00d4ff]╔══════════════════════════════════════════════╗[/#00d4ff]"
-        )
-        console.print(
-            "[#00d4ff]║[/#00d4ff]"
-            "   [bold #00d4ff]MORBION SCADA v02[/bold #00d4ff]"
-            "                            "
-            "[#00d4ff]║[/#00d4ff]"
-        )
-        console.print(
-            "[#00d4ff]║[/#00d4ff]"
-            "   [#4a7a8c]Intelligence. Precision. Vigilance.[/#4a7a8c]"
-            "        "
-            "[#00d4ff]║[/#00d4ff]"
-        )
-        console.print(
-            "[#00d4ff]╠══════════════════════════════════════════════╣[/#00d4ff]"
-        )
-        console.print(
-            f"[#00d4ff]║[/#00d4ff]"
-            f"   [#4a7a8c]Server:  [/#4a7a8c][#d0e8f0]{host}:{port}[/#d0e8f0]"
-            + " " * max(0, 20 - len(f"{host}:{port}")) +
-            f"[#00d4ff]║[/#00d4ff]"
-        )
-        console.print(
-            f"[#00d4ff]║[/#00d4ff]"
-            f"   [#4a7a8c]Status:  [/#4a7a8c]"
-            f"[{status_colour}]{status_str}[/{status_colour}]"
-            + " " * max(0, 23 - len(status_str)) +
-            f"[#00d4ff]║[/#00d4ff]"
-        )
-        console.print(
-            f"[#00d4ff]║[/#00d4ff]"
-            f"   [#4a7a8c]Operator:[/#4a7a8c] [#d0e8f0]{op}[/#d0e8f0]"
-            + " " * max(0, 29 - len(op)) +
-            f"[#00d4ff]║[/#00d4ff]"
-        )
-        console.print(
-            "[#00d4ff]╠══════════════════════════════════════════════╣[/#00d4ff]"
-        )
-        console.print(
-            "[#00d4ff]║[/#00d4ff]"
-            "                                              "
-            "[#00d4ff]║[/#00d4ff]"
-        )
-        console.print(
-            "[#00d4ff]║[/#00d4ff]"
-            "   [#ffffff][1][/#ffffff]  "
-            "[#d0e8f0]TUI  — Full-screen dashboard[/#d0e8f0]"
-            "          "
-            "[#00d4ff]║[/#00d4ff]"
-        )
-        console.print(
-            "[#00d4ff]║[/#00d4ff]"
-            "   [#ffffff][2][/#ffffff]  "
-            "[#d0e8f0]CLI  — Scripting shell[/#d0e8f0]"
-            "               "
-            "[#00d4ff]║[/#00d4ff]"
-        )
-        console.print(
-            "[#00d4ff]║[/#00d4ff]"
-            "   [#ffffff][i][/#ffffff]  "
-            "[#4a7a8c]Configure server address[/#4a7a8c]"
-            "              "
-            "[#00d4ff]║[/#00d4ff]"
-        )
-        console.print(
-            "[#00d4ff]║[/#00d4ff]"
-            "   [#ffffff][q][/#ffffff]  "
-            "[#4a7a8c]Quit[/#4a7a8c]"
-            "                                  "
-            "[#00d4ff]║[/#00d4ff]"
-        )
-        console.print(
-            "[#00d4ff]║[/#00d4ff]"
-            "                                              "
-            "[#00d4ff]║[/#00d4ff]"
-        )
-        console.print(
-            "[#00d4ff]╚══════════════════════════════════════════════╝[/#00d4ff]"
-        )
+        console.print(f"[#00d4ff]╔{'═' * W}╗[/#00d4ff]")
+        console.print(row(f"   [bold #00d4ff]MORBION SCADA v02[/bold #00d4ff]"))
+        console.print(row(f"   [#4a7a8c]Intelligence. Precision. Vigilance.[/#4a7a8c]"))
+        console.print(divider())
+        console.print(row(f"   [#4a7a8c]Server:  [/#4a7a8c][#d0e8f0]{host}:{port}[/#d0e8f0]"))
+        console.print(row(f"   [#4a7a8c]Status:  [/#4a7a8c][{status_colour}]{status_str}[/{status_colour}]"))
+        console.print(row(f"   [#4a7a8c]Operator:[/#4a7a8c] [#d0e8f0]{op}[/#d0e8f0]"))
+        console.print(divider())
+        console.print(row())
+        
+        # FIX 2: Escape the literal brackets with \\ so Rich prints them as text 
+        # instead of interpreting [i] as italics and deleting [q] entirely.
+        console.print(row(f"   [#ffffff]\\[1][/#ffffff]  [#d0e8f0]TUI  — Full-screen dashboard[/#d0e8f0]"))
+        console.print(row(f"   [#ffffff]\\[2][/#ffffff]  [#d0e8f0]CLI  — Scripting shell[/#d0e8f0]"))
+        console.print(row(f"   [#ffffff]\\[i][/#ffffff]  [#4a7a8c]Configure server address[/#4a7a8c]"))
+        console.print(row(f"   [#ffffff]\\[q][/#ffffff]  [#4a7a8c]Quit[/#4a7a8c]"))
+        
+        console.print(row())
+        console.print(f"[#00d4ff]╚{'═' * W}╝[/#00d4ff]")
         console.print()
     else:
-        # Plain fallback
         print()
-        print("=" * 50)
+        print("=" * W)
         print("  MORBION SCADA v02")
         print("  Intelligence. Precision. Vigilance.")
-        print("=" * 50)
+        print("=" * W)
         print(f"  Server:   {host}:{port}")
         print(f"  Status:   {status_str}")
         print(f"  Operator: {op}")
-        print("=" * 50)
+        print("=" * W)
         print()
         print("  [1]  TUI  — Full-screen dashboard")
         print("  [2]  CLI  — Scripting shell")
         print("  [i]  Configure server address")
         print("  [q]  Quit")
         print()
-
 
 # ── Mode launchers ────────────────────────────────────────────────────────────
 
