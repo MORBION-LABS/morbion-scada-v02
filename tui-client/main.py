@@ -1,313 +1,241 @@
 """
-main.py — MORBION SCADA v02 TUI/CLI Client Entry Point
+tui/app.py — MORBION TUI Application
 MORBION SCADA v02
 
-Main menu. Choose TUI or CLI. Exit returns here.
-Defensive: handles missing config, bad server, import errors.
+Textual App. Wires everything together:
+  - WebSocket live data feed
+  - REST client for commands
+  - Executor for all MSL commands
+  - Screen management (dashboard, process, alarms, plc, trends)
+  - Plant data routing to all active screens
+
+Exit with Ctrl+Q — returns control to main.py menu.
+Defensive: WS disconnect handled, screen errors caught,
+           all async tasks cancelled cleanly on exit.
 """
 
-import os
-import sys
-import json
 import asyncio
+from textual.app import App, ComposeResult
+from textual.binding import Binding
 
-# ── Config ────────────────────────────────────────────────────────────────────
+from core.rest_client import RestClient
+from core.ws_client import WSClient
+from core.executor import Executor
+from core.commands import PROCESS_NAMES
 
-BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
-
-DEFAULTS = {
-    "server_host":       "",
-    "server_port":       5000,
-    "operator":          "OPERATOR",
-    "poll_interval_s":   1.0,
-    "history_file":      "~/.morbion_history",
-    "verify_timeout_ms": 300,
-}
-
-
-def load_config() -> dict:
-    """Load config.json. Falls back to defaults on any failure."""
-    cfg = dict(DEFAULTS)
-    if not os.path.exists(CONFIG_PATH):
-        return cfg
-    try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, dict):
-            cfg.update(data)
-    except (OSError, json.JSONDecodeError):
-        pass
-    return cfg
+from tui.screens.dashboard import DashboardScreen
+from tui.screens.process import ProcessScreen
+from tui.screens.alarms import AlarmsScreen
+from tui.screens.plc import PLCScreen
+from tui.screens.trends import TrendsScreen
 
 
-# ── Server probe ──────────────────────────────────────────────────────────────
-
-async def _probe_server(host: str, port: int) -> tuple:
+class MorbionTUI(App):
     """
-    Quick health check. Returns (online: bool, processes_online: int).
-    Uses /data endpoint since /health may not include processes_online.
-    Timeout 3s — menu must not hang.
-    """
-    if not host:
-        return False, 0
-    try:
-        from core.rest_client import RestClient
-        async with RestClient(host, port, timeout=3.0) as rest:
-            # Try /health first
-            health = await rest.get_health()
-            if health is None:
-                return False, 0
-            # Count online processes from /data
-            data = await rest.get_data()
-            if data is None:
-                return True, 0
-            n = 0
-            for proc in (
-                "pumping_station",
-                "heat_exchanger",
-                "boiler",
-                "pipeline",
-            ):
-                if data.get(proc, {}).get("online"):
-                    n += 1
-            return True, n
-    except Exception:
-        return False, 0
+    MORBION SCADA v02 — Full-screen TUI Dashboard.
 
-
-def probe_server(host: str, port: int) -> tuple:
-    """Synchronous wrapper around async probe."""
-    try:
-        return asyncio.run(_probe_server(host, port))
-    except Exception:
-        return False, 0
-
-
-# ── Rich imports — degrade gracefully if not installed ────────────────────────
-
-try:
-    from rich.console import Console
-    from rich.panel   import Panel
-    from rich.text    import Text
-    _RICH = True
-    console = Console(highlight=False)
-except ImportError:
-    _RICH   = False
-    console = None
-
-
-def _print(text: str, colour: str = "#d0e8f0") -> None:
-    """Print with Rich if available, else plain."""
-    if _RICH and console:
-        console.print(f"[{colour}]{text}[/{colour}]")
-    else:
-        print(text)
-
-
-# ── Menu drawing ──────────────────────────────────────────────────────────────
-
-def _draw_menu(config: dict, online: bool, n_online: int) -> None:
-    """Draw the main menu. Uses fixed-width padding safe on Windows."""
-    host   = config.get("server_host") or "NOT CONFIGURED"
-    port   = config.get("server_port", 5000)
-    op     = config.get("operator", "OPERATOR")
-
-    if online:
-        status_str    = f"●ONLINE  {n_online}/4 processes"
-        status_colour = "#00ff88"
-    elif not config.get("server_host"):
-        status_str    = "○NOT CONFIGURED"
-        status_colour = "#ffaa00"
-    else:
-        status_str    = "○OFFLINE"
-        status_colour = "#ff3333"
-
-    W = 48   # inner width between ║ and ║
-
-    def row(content: str = "") -> str:
-        """Pad content to exactly W chars between box walls."""
-        import re
-        
-        # FIX 1: Use negative lookbehind to ignore escaped brackets (like \\[1]) 
-        # when stripping markup tags so they aren't removed before counting.
-        plain = re.sub(r'(?<!\\)\[.*?\]', '', content)
-        
-        # Convert escaped brackets back to normal brackets for the final length count.
-        plain = plain.replace(r'\[', '[')
-        
-        pad   = W - len(plain)
-        pad   = max(0, pad)
-        return f"[#00d4ff]║[/#00d4ff]{content}{' ' * pad}[#00d4ff]║[/#00d4ff]"
-
-    def divider() -> str:
-        return f"[#00d4ff]╠{'═' * W}╣[/#00d4ff]"
-
-    if _RICH and console:
-        console.clear()
-        console.print()
-        console.print(f"[#00d4ff]╔{'═' * W}╗[/#00d4ff]")
-        console.print(row(f"   [bold #00d4ff]MORBION SCADA v02[/bold #00d4ff]"))
-        console.print(row(f"   [#4a7a8c]Intelligence. Precision. Vigilance.[/#4a7a8c]"))
-        console.print(divider())
-        console.print(row(f"   [#4a7a8c]Server:  [/#4a7a8c][#d0e8f0]{host}:{port}[/#d0e8f0]"))
-        console.print(row(f"   [#4a7a8c]Status:  [/#4a7a8c][{status_colour}]{status_str}[/{status_colour}]"))
-        console.print(row(f"   [#4a7a8c]Operator:[/#4a7a8c] [#d0e8f0]{op}[/#d0e8f0]"))
-        console.print(divider())
-        console.print(row())
-        
-        # FIX 2: Escape the literal brackets with \\ so Rich prints them as text 
-        # instead of interpreting [i] as italics and deleting [q] entirely.
-        console.print(row(f"   [#ffffff]\\[1][/#ffffff]  [#d0e8f0]TUI  — Full-screen dashboard[/#d0e8f0]"))
-        console.print(row(f"   [#ffffff]\\[2][/#ffffff]  [#d0e8f0]CLI  — Scripting shell[/#d0e8f0]"))
-        console.print(row(f"   [#ffffff]\\[i][/#ffffff]  [#4a7a8c]Configure server address[/#4a7a8c]"))
-        console.print(row(f"   [#ffffff]\\[q][/#ffffff]  [#4a7a8c]Quit[/#4a7a8c]"))
-        
-        console.print(row())
-        console.print(f"[#00d4ff]╚{'═' * W}╝[/#00d4ff]")
-        console.print()
-    else:
-        print()
-        print("=" * W)
-        print("  MORBION SCADA v02")
-        print("  Intelligence. Precision. Vigilance.")
-        print("=" * W)
-        print(f"  Server:   {host}:{port}")
-        print(f"  Status:   {status_str}")
-        print(f"  Operator: {op}")
-        print("=" * W)
-        print()
-        print("  [1]  TUI  — Full-screen dashboard")
-        print("  [2]  CLI  — Scripting shell")
-        print("  [i]  Configure server address")
-        print("  [q]  Quit")
-        print()
-
-
-# ── Mode launchers ────────────────────────────────────────────────────────────
-
-def _launch_cli(config: dict) -> None:
-    """Launch CLI shell. Blocks until user exits."""
-    if not config.get("server_host"):
-        _print(
-            "  Server not configured. Press [i] to configure.",
-            "#ffaa00"
-        )
-        input("  Press Enter to return to menu...")
-        return
-    try:
-        from cli.shell import CLIShell
-        shell = CLIShell(config)
-        shell.run()
-    except ImportError as e:
-        _print(f"  CLI import error: {e}", "#ff3333")
-        _print("  Run: pip install -r requirements.txt", "#ffaa00")
-        input("  Press Enter to return to menu...")
-    except Exception as e:
-        _print(f"  CLI error: {e}", "#ff3333")
-        input("  Press Enter to return to menu...")
-
-
-def _launch_tui(config: dict) -> None:
-    """Launch TUI dashboard. Blocks until user exits (Ctrl+Q)."""
-    if not config.get("server_host"):
-        _print(
-            "  Server not configured. Press [i] to configure.",
-            "#ffaa00"
-        )
-        input("  Press Enter to return to menu...")
-        return
-    try:
-        from tui.app import MorbionTUI
+    Lifecycle:
         app = MorbionTUI(config=config)
-        app.run()
-    except ImportError as e:
-        _print(f"  TUI import error: {e}", "#ff3333")
-        _print("  Run: pip install -r requirements.txt", "#ffaa00")
-        input("  Press Enter to return to menu...")
-    except Exception as e:
-        _print(f"  TUI error: {e}", "#ff3333")
-        input("  Press Enter to return to menu...")
-
-
-def _run_installer() -> dict:
-    """Run installer inline and reload config."""
-    try:
-        import installer
-        installer.main()
-    except Exception as e:
-        _print(f"  Installer error: {e}", "#ff3333")
-    return load_config()
-
-
-# ── Main ──────────────────────────────────────────────────────────────────────
-
-def main() -> None:
+        app.run()   ← blocks until Ctrl+Q
     """
-    Main menu loop.
-    Probes server on each menu draw.
-    Dispatches to TUI or CLI.
-    Returns on quit.
-    Defensive: all branches wrapped, never crashes to traceback.
+
+    TITLE   = "MORBION SCADA v02"
+    CSS_PATH = None   # all CSS inline in widgets/screens
+
+    BINDINGS = [
+        Binding("ctrl+q", "quit", "Quit", show=True, priority=True),
+    ]
+
+    # ── Theme ──────────────────────────────────────────────────────────────────
+
+    DEFAULT_CSS = """
+    App {
+        background: #02080a;
+        color: #d0e8f0;
+    }
+    Screen {
+        background: #02080a;
+    }
     """
-    config = load_config()
 
-    while True:
-        # Probe server — non-blocking, timeout 3s
-        host = config.get("server_host", "")
-        port = config.get("server_port", 5000)
+    def __init__(self, config: dict, **kwargs):
+        super().__init__(**kwargs)
 
-        if host:
-            try:
-                online, n_online = probe_server(host, int(port))
-            except Exception:
-                online, n_online = False, 0
-        else:
-            online, n_online = False, 0
+        # Config
+        self._host     = config.get("server_host", "")
+        self._port     = int(config.get("server_port", 5000))
+        self._operator = config.get("operator", "OPERATOR")
+        self._verify   = int(config.get("verify_timeout_ms", 300))
 
-        _draw_menu(config, online, n_online)
+        # State
+        self._plant_cache: dict   = {}
+        self._ws_connected: bool  = False
+        self._heartbeat:    int   = 0
 
-        # Input
+        # These are set during on_mount after event loop is running
+        self._rest:     RestClient | None = None
+        self._ws:       WSClient   | None = None
+        self._executor: Executor   | None = None
+        self._ws_task:  asyncio.Task | None = None
+        self._rest_ctx  = None   # async context manager handle
+
+    # ── Screens ───────────────────────────────────────────────────────────────
+
+    SCREENS = {
+        "dashboard": DashboardScreen,
+        "process":   ProcessScreen,
+        "alarms":    AlarmsScreen,
+        "plc":       PLCScreen,
+        "trends":    TrendsScreen,
+    }
+
+    def on_mount(self) -> None:
+        """Start REST + WS, push dashboard, begin data feed."""
+        # Install all screens
+        for name, cls in self.SCREENS.items():
+            self.install_screen(cls, name=name)
+
+        # Push dashboard as base screen
+        self.push_screen("dashboard")
+
+        # Start async setup
+        self.call_later(self._async_setup)
+
+    async def _async_setup(self) -> None:
+        """
+        Open REST client, start WS feed, create executor.
+        Defensive: if server unreachable, TUI still runs — shows OFFLINE.
+        """
+        if not self._host:
+            return
+
         try:
-            if _RICH and console:
-                console.print("[#00d4ff]Choice:[/#00d4ff] ", end="")
-            else:
-                print("Choice: ", end="", flush=True)
-            choice = input().strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            # Ctrl+D or Ctrl+C at menu → clean exit
-            _print("\n  Goodbye.", "#4a7a8c")
-            sys.exit(0)
-        except Exception:
-            continue
+            # Open REST client — keep it open for app lifetime
+            rest = RestClient(self._host, self._port, timeout=10.0)
+            await rest.__aenter__()
+            self._rest     = rest
+            self._rest_ctx = rest
 
-        if choice in ("1", "tui"):
-            _launch_tui(config)
-            # Reload config in case it changed during session
-            config = load_config()
-
-        elif choice in ("2", "cli"):
-            _launch_cli(config)
-            config = load_config()
-
-        elif choice in ("i", "install", "configure"):
-            config = _run_installer()
-
-        elif choice in ("q", "quit", "exit"):
-            _print("  Goodbye.", "#4a7a8c")
-            sys.exit(0)
-
-        else:
-            _print(
-                f"  Unknown choice: {choice!r}. Press 1, 2, i, or q.",
-                "#ffaa00"
+            # Create executor
+            self._executor = Executor(
+                rest              = rest,
+                get_plant         = lambda: self._plant_cache,
+                operator          = self._operator,
+                verify_timeout_ms = self._verify,
             )
+
+            # Expose rest on app for screens that access it directly
+            # (alarms screen loads history via app._rest)
+        except Exception as e:
+            # REST setup failed — TUI still loads, commands will fail gracefully
+            pass
+
+        # Start WebSocket feed as background task
+        try:
+            self._ws = WSClient(
+                host          = self._host,
+                port          = self._port,
+                on_data       = self._on_ws_data,
+                on_connect    = self._on_ws_connect,
+                on_disconnect = self._on_ws_disconnect,
+            )
+            self._ws_task = asyncio.create_task(
+                self._ws.run(),
+                name="morbion-ws-feed",
+            )
+        except Exception:
+            pass
+
+    # ── WebSocket callbacks ───────────────────────────────────────────────────
+
+    def _on_ws_data(self, data: dict) -> None:
+        """
+        Called on every WS push. Routes data to all screens.
+        Defensive: invalid data silently ignored.
+        """
+        if not isinstance(data, dict):
+            return
+
+        self._plant_cache  = data
+        self._ws_connected = True
+        self._heartbeat    = (self._heartbeat + 1) % 10000
+
+        # Route to screens — call_from_thread ensures thread safety
+        self.call_from_thread(self._route_data, data, self._heartbeat)
+
+    def _route_data(self, data: dict, heartbeat: int) -> None:
+        """
+        Route plant data to whichever screens are currently mounted.
+        Catches all per-screen exceptions — one bad screen never kills feed.
+        """
+        # Dashboard (always mounted as base)
+        try:
+            screen = self.get_screen("dashboard")
+            if hasattr(screen, "update_plant"):
+                screen.update_plant(data, heartbeat)
+        except Exception:
+            pass
+
+        # Trends (if active)
+        try:
+            screen = self.get_screen("trends")
+            if hasattr(screen, "update_trends"):
+                screen.update_trends(data)
+        except Exception:
+            pass
+
+        # Alarms (if active)
+        try:
+            screen = self.get_screen("alarms")
+            if hasattr(screen, "update_alarms"):
+                screen.update_alarms(data.get("alarms", []))
+        except Exception:
+            pass
+
+        # Process (if active) — cache is enough, it reads from _plant_cache
+        try:
+            screen = self.get_screen("process")
+            if hasattr(screen, "update_process"):
+                screen.update_process(data)
+        except Exception:
+            pass
+
+    async def _on_ws_connect(self) -> None:
+        self._ws_connected = True
+
+    async def _on_ws_disconnect(self) -> None:
+        self._ws_connected = False
+
+    # ── Cleanup ───────────────────────────────────────────────────────────────
+
+    async def action_quit(self) -> None:
+        """Clean shutdown. Cancel WS task, close REST client."""
+        await self._shutdown()
+        self.exit()
+
+    async def _shutdown(self) -> None:
+        """Teardown all async resources."""
+        # Stop WS
+        if self._ws:
             try:
-                input("  Press Enter to continue...")
-            except (EOFError, KeyboardInterrupt):
-                _print("\n  Goodbye.", "#4a7a8c")
-                sys.exit(0)
+                self._ws.stop()
+            except Exception:
+                pass
 
+        if self._ws_task and not self._ws_task.done():
+            try:
+                self._ws_task.cancel()
+                await asyncio.wait_for(self._ws_task, timeout=2.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+                pass
 
-if __name__ == "__main__":
-    main()
+        # Close REST client
+        if self._rest_ctx:
+            try:
+                await self._rest_ctx.__aexit__(None, None, None)
+            except Exception:
+                pass
+
+        self._rest     = None
+        self._executor = None
+        self._ws       = None
